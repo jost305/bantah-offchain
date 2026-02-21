@@ -28,6 +28,7 @@ playwright.config.ts
 hardhat.config.ts
 drizzle.config.ts
 Dockerfile
+package-lock.json
 client/public/assets/avatar/bantah-guys-avatar 1.svg
 client/public/assets/avatar/bantah-guys-avatar 5.svg
 client/public/assets/avatar/bantah-guys-avatar 6 (1).svg
