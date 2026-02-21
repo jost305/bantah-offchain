@@ -111,8 +111,14 @@ async function seedAdmin() {
 // Export the function for use as a module
 export default seedAdmin;
 
-// Run seeding if called directly (ESM module)
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run seeding only when the seed script itself is executed directly.
+// In bundled production builds, process.argv[1] is usually dist/index.js,
+// so we must avoid auto-running here to prevent accidental process.exit().
+const isDirectSeedScriptRun =
+  import.meta.url === `file://${process.argv[1]}` &&
+  /seedAdmin(\.ts|\.js)?$/i.test(process.argv[1] ?? "");
+
+if (isDirectSeedScriptRun) {
   seedAdmin()
     .then(() => {
       console.log("Admin seeding completed");
