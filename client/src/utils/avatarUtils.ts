@@ -6,13 +6,9 @@ const AVATAR_FILES = [
   'bantah-guys-2-2d 3.png',
   'bantah-guys-avatar (1).png',
   'bantah-guys-avatar 1.png',
-  'bantah-guys-avatar 1.svg',
   'bantah-guys-avatar 2.png',
   'bantah-guys-avatar 3.png',
-  'bantah-guys-avatar 4.png',
-  'bantah-guys-avatar 5.svg',
-  'bantah-guys-avatar 6 (1).svg',
-  'bantah-guys-avatar 6.svg'
+  'bantah-guys-avatar 4.png'
 ];
 
 export const generateAvatar = (seed: string, size: number = 128) => {
