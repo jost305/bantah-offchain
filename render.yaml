@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: bantah-offchain-backend
+    env: docker
+    branch: main
+    plan: free
+    dockerfilePath: Dockerfile
+    regions:
+      - oregon
+    pullRequestPreviewsEnabled: false
+    autoDeploy: true
