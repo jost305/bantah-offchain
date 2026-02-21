@@ -1,0 +1,34 @@
+.git
+node_modules
+dist
+cache
+artifacts
+.codex-tmp
+.codex-tmp*
+attached_assets
+chrome-extension
+archived
+tests
+docs
+map
+api
+app
+contracts
+scripts
+supabase
+*.log
+*.zip
+*.tar.gz
+bantah.db
+.env
+.env.local
+.env.production
+*.cmd
+playwright.config.ts
+hardhat.config.ts
+drizzle.config.ts
+Dockerfile
+client/public/assets/avatar/bantah-guys-avatar 1.svg
+client/public/assets/avatar/bantah-guys-avatar 5.svg
+client/public/assets/avatar/bantah-guys-avatar 6 (1).svg
+client/public/assets/avatar/bantah-guys-avatar 6.svg
