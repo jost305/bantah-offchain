@@ -154,6 +154,15 @@ app.use((req, res, next) => {
   } else {
     // Production: serve static files
     if (fs.existsSync(distPublicPath)) {
+      const clientPublicPath = path.resolve(__dirname, "../client/public");
+      const rootPublicPath = path.resolve(__dirname, "../public");
+      const mapPublicPath = path.resolve(__dirname, "../map");
+
+      app.use("/assets", express.static(path.join(clientPublicPath, "assets")));
+      app.use("/fonts", express.static(path.join(clientPublicPath, "fonts")));
+      app.use("/map", express.static(mapPublicPath));
+      app.use(express.static(clientPublicPath));
+      app.use(express.static(rootPublicPath));
       app.use(express.static(distPublicPath));
 
       app.get("*", (_req, res) => {
