@@ -22,3 +22,5 @@ vite.config.ts.*
 *.db
 test_response.json
 telegram-app-types.zip
+
+.vercel
