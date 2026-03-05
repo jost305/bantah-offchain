@@ -507,8 +507,8 @@ export class DatabaseStorage implements IStorage {
 
     if (totalReserved <= 0) return { released: false, reason: 'no_reserved_funds' };
 
-    // Platform fee (use platformSettings table if available; fallback to 5%)
-    let platformFeePct = 0.05;
+    // Platform fee (use platformSettings table if available; fallback to 3%)
+    let platformFeePct = 0.03;
     try {
       const settings: any = await pool.query(`SELECT value FROM platform_settings WHERE key='platform_fee_pct' LIMIT 1`);
       if (settings.rows && settings.rows[0]) {
@@ -602,8 +602,8 @@ export class DatabaseStorage implements IStorage {
         await client.query(`UPDATE challenges SET status='cancelled' WHERE id = $1`, [challengeId]);
       } else if (resolution.type === 'winner' && resolution.winnerParticipantId) {
         const winnerId = resolution.winnerParticipantId;
-        // apply platform fee default 5%
-        const platformFee = totalReserved * 0.05;
+        // apply platform fee default 3%
+        const platformFee = totalReserved * 0.03;
         const net = totalReserved - platformFee;
         await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [net, winnerId]);
         await client.query(`INSERT INTO transactions (user_id, type, amount, description, related_id, status, created_at) VALUES ($1,$2,$3,$4,$5,'completed',now())`, [winnerId, 'challenge_payout_admin', net.toString(), `Admin resolved payout for challenge ${challengeId}`, challengeId]);
@@ -2022,7 +2022,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const totalAmount = parseFloat(String(challenge.amount || '0')) * 2; // Both participants contributed
-    const platformFeeRate = 0.05; // 5% platform fee
+    const platformFeeRate = 0.03; // 3% platform fee
     const platformFee = totalAmount * platformFeeRate;
     let winnerPayout = totalAmount - platformFee;
 
@@ -2192,8 +2192,8 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
-    // Award admin commission (5% of total amount)
-    const adminCommission = totalAmount * 0.05;
+    // Award admin commission (3% of total amount)
+    const adminCommission = totalAmount * 0.03;
     const admin = await this.db.query.users.findFirst({
       where: (users, { eq }) => eq(users.role, 'admin'),
     });
@@ -3410,10 +3410,10 @@ export class DatabaseStorage implements IStorage {
       })
       .from(transactions);
 
-    // Calculate platform revenue (5% of challenge stakes + 3% event creator fees)
+    // Calculate platform revenue (3% of challenge stakes + 3% event creator fees)
     const challengeVolume = parseFloat(challengeStats?.totalChallengeStaked || '0');
     const creatorFees = parseFloat(eventStats?.totalCreatorFees || '0');
-    const platformFees = (challengeVolume * 0.05) + creatorFees;
+    const platformFees = (challengeVolume * 0.03) + creatorFees;
     const totalVolume = parseFloat(eventStats?.totalEventPool || '0') + challengeVolume;
 
     return {
@@ -3433,7 +3433,7 @@ export class DatabaseStorage implements IStorage {
       totalChallengeStaked: challengeVolume,
       totalRevenue: platformFees,
       totalCreatorFees: creatorFees,
-      totalPlatformFees: challengeVolume * 0.05,
+      totalPlatformFees: challengeVolume * 0.03,
       totalDeposits: parseFloat(transactionStats?.totalDeposits || '0'),
       totalWithdrawals: parseFloat(transactionStats?.totalWithdrawals || '0'),
       pendingPayouts: transactionStats?.pendingPayouts || 0,

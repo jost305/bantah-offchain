@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "./useAuth";
 
 interface BadgeCounts {
   profile: number;
@@ -7,11 +8,13 @@ interface BadgeCounts {
 }
 
 export function useBadges() {
+  const { user } = useAuth();
   const { data: badges = { profile: 0, events: 0, challenges: 0 } } = useQuery<BadgeCounts>({
     queryKey: ["/api/navigation/badges"],
+    enabled: !!user,
     staleTime: 30000, // 30 seconds
     refetchInterval: 60000, // 1 minute
-    retry: 1,
+    retry: false,
   });
 
   return {

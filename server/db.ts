@@ -9,14 +9,19 @@ if (!process.env.DATABASE_URL) {
 }
 
 const isProd = process.env.NODE_ENV === 'production';
+const sslRejectUnauthorized = process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true';
 
 // Session Pooler configuration for Supabase
 // This works with IPv4 networks (like Codespaces)
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: isProd ? true : false,
-  },
+  ssl: isProd
+    ? {
+        // Supabase pooler connections may require relaxed cert verification.
+        // Set DB_SSL_REJECT_UNAUTHORIZED=true to enforce strict verification.
+        rejectUnauthorized: sslRejectUnauthorized,
+      }
+    : false,
   // Session pooler requires max: 1 connection per session
   max: 1,
   idleTimeoutMillis: 0,

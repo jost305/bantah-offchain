@@ -49,6 +49,8 @@ interface ChallengeBroadcast {
     username?: string;
   };
   stake_amount: number;
+  stake_display?: string;
+  settlement_label?: string;
   status: string;
   end_time?: string;
   category?: string;
@@ -361,6 +363,15 @@ ${timeInfo}
                        challenge.status === 'active' ? '🔥' :
                        challenge.status === 'completed' ? '✅' : '📋';
 
+    const stakeDisplay =
+      typeof challenge.stake_display === 'string' && challenge.stake_display.trim().length > 0
+        ? challenge.stake_display.trim()
+        : `₦${challenge.stake_amount.toLocaleString()}`;
+    const settlementLine =
+      typeof challenge.settlement_label === 'string' && challenge.settlement_label.trim().length > 0
+        ? `🧾 *Settlement:* ${challenge.settlement_label.trim()}`
+        : '';
+
     const message = `⚔️ *NEW P2P CHALLENGE*
 
 ━━━━━━━━━━━━━━━━━━━━━
@@ -370,7 +381,8 @@ ${categoryEmoji} *${challenge.title}*
 ${challenge.description ? `💭 _${challenge.description}_\n` : ''}
 🚀 *Challenger:* ${challengerDisplay}
 ${challengedDisplay ? `🎯 *Challenged:* ${challengedDisplay}` : '🌍 *Open Challenge - Anyone can accept!*'}
-💰 *Stake Amount:* ₦${challenge.stake_amount.toLocaleString()}
+💰 *Stake Amount:* ${stakeDisplay}
+${settlementLine}
 ${statusEmoji} *Status:* ${challenge.status.charAt(0).toUpperCase() + challenge.status.slice(1)}
 ${challenge.category ? `${categoryEmoji} *Category:* ${challenge.category.charAt(0).toUpperCase() + challenge.category.slice(1)}` : ''}
 

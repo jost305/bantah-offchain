@@ -701,7 +701,7 @@ export async function calculatePartnerFeeSettlement(challengeId: number, settled
   );
 
   const totalPool = toInt(stakeResult.rows[0]?.total_pool, 0);
-  const platformFee = Math.floor(totalPool * 0.05);
+  const platformFee = Math.floor(totalPool * 0.03);
   const partnerFee = Math.floor((platformFee * meta.partnerFeeBps) / 10000);
 
   const settled = await pool.query(

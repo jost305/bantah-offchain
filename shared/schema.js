@@ -398,7 +398,7 @@ export const platformSettings = pgTable("platform_settings", {
     registrationEnabled: boolean("registration_enabled").default(true),
     minBetAmount: decimal("min_bet_amount", { precision: 10, scale: 2 }).default("100.00"),
     maxBetAmount: decimal("max_bet_amount", { precision: 10, scale: 2 }).default("100000.00"),
-    platformFeePercentage: decimal("platform_fee_percentage", { precision: 3, scale: 1 }).default("5.0"),
+    platformFeePercentage: decimal("platform_fee_percentage", { precision: 3, scale: 1 }).default("3.0"),
     creatorFeePercentage: decimal("creator_fee_percentage", { precision: 3, scale: 1 }).default("3.0"),
     withdrawalEnabled: boolean("withdrawal_enabled").default(true),
     depositEnabled: boolean("deposit_enabled").default(true),

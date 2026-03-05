@@ -1,8 +1,7 @@
 import { db } from './db';
-import { users, transactions, payoutEntries } from '../shared/schema';
+import { users, transactions, payoutEntries, adminWalletTransactions } from '../shared/schema';
 import { eq, sql } from 'drizzle-orm';
 import { payoutQueue } from './payoutQueue';
-import { storage } from './storage';
 
 /**
  * Payout Worker - Processes payout jobs in batches
@@ -45,12 +44,14 @@ export class PayoutWorker {
       const pendingJobs = await payoutQueue.getPendingJobs();
 
       for (const job of pendingJobs) {
-        if (job.status === 'queued') {
+        let currentStatus = job.status;
+        if (currentStatus === 'queued') {
           // Start the job
           await payoutQueue.startJob(job.id);
+          currentStatus = 'running';
         }
 
-        if (job.status === 'running') {
+        if (currentStatus === 'running') {
           // Process next batch
           await this.processBatch(job.id);
         }
@@ -76,6 +77,7 @@ export class PayoutWorker {
 
       if (entries.length === 0) {
         // All entries processed
+        await this.creditPlatformFeeToAdmin(job);
         await payoutQueue.completeJob(jobId);
         console.log(`✅ Payout job ${jobId} completed successfully`);
         return;
@@ -111,6 +113,76 @@ export class PayoutWorker {
       console.error(`Error processing batch for job ${jobId}:`, error);
       await payoutQueue.failJob(jobId, String(error));
     }
+  }
+
+  /**
+   * Credits the platform fee from a payout job to admin wallet once.
+   */
+  private async creditPlatformFeeToAdmin(
+    job: { id: string; challengeId: number; platformFee: number }
+  ): Promise<void> {
+    const feeNaira = Number(job.platformFee || 0) / 100;
+    if (!Number.isFinite(feeNaira) || feeNaira <= 0) {
+      return;
+    }
+
+    const reference = `payout_job_${job.id}_platform_fee`;
+
+    await db.transaction(async (tx) => {
+      const existing = await tx
+        .select({ id: adminWalletTransactions.id })
+        .from(adminWalletTransactions)
+        .where(eq(adminWalletTransactions.reference, reference))
+        .limit(1);
+
+      if (existing.length > 0) {
+        return;
+      }
+
+      const admins = await tx
+        .select({
+          id: users.id,
+          adminWalletBalance: users.adminWalletBalance,
+          adminTotalCommission: users.adminTotalCommission,
+        })
+        .from(users)
+        .where(eq(users.isAdmin, true))
+        .limit(1);
+
+      const admin = admins[0];
+      if (!admin) {
+        console.warn(
+          `No admin found to receive platform fee for payout job ${job.id} (challenge ${job.challengeId})`
+        );
+        return;
+      }
+
+      const currentBalance = parseFloat(String(admin.adminWalletBalance || '0'));
+      const currentCommission = parseFloat(String(admin.adminTotalCommission || '0'));
+      const newBalance = currentBalance + feeNaira;
+      const newCommission = currentCommission + feeNaira;
+
+      await tx
+        .update(users)
+        .set({
+          adminWalletBalance: newBalance.toFixed(2),
+          adminTotalCommission: newCommission.toFixed(2),
+        })
+        .where(eq(users.id, admin.id));
+
+      await tx.insert(adminWalletTransactions).values({
+        adminId: admin.id,
+        type: 'commission_earned',
+        amount: feeNaira.toFixed(2),
+        description: `Platform fee credited from payout job ${job.id}`,
+        relatedId: job.challengeId,
+        relatedType: 'challenge',
+        reference,
+        status: 'completed',
+        balanceBefore: currentBalance.toFixed(2),
+        balanceAfter: newBalance.toFixed(2),
+      });
+    });
   }
 
   /**
@@ -169,11 +241,13 @@ export class PayoutWorker {
         return;
       }
 
-      if (job.status === 'queued') {
+      let currentStatus = job.status;
+      if (currentStatus === 'queued') {
         await payoutQueue.startJob(jobId);
+        currentStatus = 'running';
       }
 
-      if (job.status === 'running') {
+      if (currentStatus === 'running') {
         await this.processBatch(jobId);
       }
     } catch (error) {

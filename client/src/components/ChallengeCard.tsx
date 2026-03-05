@@ -264,7 +264,20 @@ export function ChallengeCard({
     },
   });
 
-  const isEnded = effectiveStatus === 'completed' || (challenge.dueDate && new Date(challenge.dueDate).getTime() <= Date.now());
+  const challengeTitleLower = String(challenge.title || "").toLowerCase();
+  const isUpDownMarket =
+    challenge.adminCreated === true &&
+    String(challenge.category || "").toLowerCase() === "crypto" &&
+    (challengeTitleLower.includes("bitcoin") || challengeTitleLower.includes("btc")) &&
+    (
+      challengeTitleLower.includes("up or down") ||
+      challengeTitleLower.includes("up/down") ||
+      (challengeTitleLower.includes("up") && challengeTitleLower.includes("down"))
+    );
+  // Continuous Up/Down markets should not auto-end by dueDate.
+  const isEnded =
+    effectiveStatus === 'completed' ||
+    (!isUpDownMarket && challenge.dueDate && new Date(challenge.dueDate).getTime() <= Date.now());
   const isFinishedChallengeCard =
     isEnded ||
     effectiveStatus === "completed" ||
@@ -455,6 +468,8 @@ export function ChallengeCard({
     !hasJoined &&
     (!hasDesignatedOpponent || (user && user.id === challengedId));
 
+  const isLiveUpDownRound = isUpDownMarket && !isFinishedChallengeCard;
+
   // Normalize challenger/challenged side fields (support multiple possible field names)
   const challengerSideRaw = (challenge.challengerSide || (challenge as any).challenger_side || (challenge as any).challengerChoice || (challenge as any).challenger_choice) ?? null;
   const challengedSideRaw = (challenge.challengedSide || (challenge as any).challenged_side || (challenge as any).challengedChoice || (challenge as any).challenged_choice) ?? null;
@@ -471,6 +486,15 @@ export function ChallengeCard({
 
   if (challengerSide !== "YES" && challengerSide !== "NO") challengerSide = null;
   if (challengedSide !== "YES" && challengedSide !== "NO") challengedSide = null;
+  const formatSideLabel = (side: "YES" | "NO" | null) => {
+    if (!side) return null;
+    if (isUpDownMarket) {
+      return side === "YES" ? "UP" : "DOWN";
+    }
+    return side;
+  };
+  const challengerSideLabel = formatSideLabel(challengerSide);
+  const challengedSideLabel = formatSideLabel(challengedSide);
 
   const isValidParticipantId = (id: unknown): id is string => {
     if (typeof id !== "string") return false;
@@ -549,6 +573,15 @@ export function ChallengeCard({
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0 flex-wrap">
             <div onClick={(e) => e.stopPropagation()} className="flex items-center gap-0.5">
+              {isLiveUpDownRound && (
+                <Badge className="bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border-none text-[10px] px-2 py-0.5">
+                  <span className="relative mr-1 inline-flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                  </span>
+                  LIVE 5M
+                </Badge>
+              )}
               {effectiveStatus === "open" && isEnded && (
                 <Badge className="bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-none text-[10px] px-2 py-0.5">
                   Ended
@@ -614,9 +647,9 @@ export function ChallengeCard({
                       className={`w-9 h-9 ring-2 ring-white dark:ring-slate-800 shadow-sm ${!challenge.adminCreated ? 'cursor-pointer hover:opacity-80' : ''}`}
                       onClick={(e) => handleAvatarClick(e, challenge.challengerUser?.id)}
                     />
-                    {challengerSide && (
+                    {challengerSideLabel && (
                       <span className={`absolute -top-1 -right-1 text-[9px] px-1 py-0.5 rounded-full font-bold ${challengerSide === 'YES' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
-                        {challengerSide}
+                        {challengerSideLabel}
                       </span>
                     )}
                     {isFinishedChallengeCard && challengerIsWinner && (
@@ -656,9 +689,9 @@ export function ChallengeCard({
                         onClick={(e) => handleAvatarClick(e, challenge.challengedUser?.id)}
                       />
                     )}
-                    {!showWaitingOpponent && challengedSide && (
+                    {!showWaitingOpponent && challengedSideLabel && (
                       <span className={`absolute -top-1 -right-1 text-[9px] px-1 py-0.5 rounded-full font-bold ${challengedSide === 'YES' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
-                        {challengedSide}
+                        {challengedSideLabel}
                       </span>
                     )}
                     {isFinishedChallengeCard && challengedIsWinner && !showWaitingOpponent && (
@@ -675,7 +708,7 @@ export function ChallengeCard({
             </div>
           ) : (
             <div className="flex flex-col gap-2 w-full">
-              {/* Regular Admin Challenges: Show Yes/No buttons */}
+              {/* Admin-created challenge side buttons */}
               {effectiveStatus === 'open' && (
                 <div className="flex flex-row items-center justify-center h-10 gap-2 w-full">
                   <button
@@ -693,7 +726,7 @@ export function ChallengeCard({
                     }`}
                     data-testid="button-challenge-yes"
                   >
-                    Yes
+                    {isUpDownMarket ? "UP" : "Yes"}
                   </button>
                   <button
                     onClick={(e) => {
@@ -710,7 +743,7 @@ export function ChallengeCard({
                     }`}
                     data-testid="button-challenge-no"
                   >
-                    No
+                    {isUpDownMarket ? "DOWN" : "No"}
                   </button>
                 </div>
               )}
@@ -718,17 +751,18 @@ export function ChallengeCard({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-1 mb-1.5">
-          <Badge variant="outline" className="flex flex-col items-center py-0.5 px-2 bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-700 rounded-lg h-auto min-w-[60px] shadow-sm">
-            <span className="text-[8px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tight mb-0">Stake</span>
-            <span className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-none">₦{(parseFloat(String(challenge.amount)) || 0).toLocaleString()}</span>
-          </Badge>
-          <Badge variant="outline" className="flex flex-col items-center py-0.5 px-2 bg-emerald-50/40 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900/50 rounded-lg h-auto min-w-[60px] shadow-sm">
-            <span className="text-[8px] text-emerald-600/70 dark:text-emerald-400/70 uppercase font-bold tracking-tight mb-0">Win</span>
-            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 leading-none">₦{(Math.round((parseFloat(String(challenge.amount)) || 0) * 2 * (parseFloat(String(challenge.bonusMultiplier || "1.00")) || 1))).toLocaleString()}</span>
-          </Badge>
-        </div>
-
+        {!isUpDownMarket && (
+          <div className="flex items-center justify-between gap-1 mb-1.5">
+            <Badge variant="outline" className="flex flex-col items-center py-0.5 px-2 bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-700 rounded-lg h-auto min-w-[60px] shadow-sm">
+              <span className="text-[8px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tight mb-0">Stake</span>
+              <span className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-none">NGN {(parseFloat(String(challenge.amount)) || 0).toLocaleString()}</span>
+            </Badge>
+            <Badge variant="outline" className="flex flex-col items-center py-0.5 px-2 bg-emerald-50/40 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900/50 rounded-lg h-auto min-w-[60px] shadow-sm">
+              <span className="text-[8px] text-emerald-600/70 dark:text-emerald-400/70 uppercase font-bold tracking-tight mb-0">Win</span>
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 leading-none">NGN {(Math.round((parseFloat(String(challenge.amount)) || 0) * 2 * (parseFloat(String(challenge.bonusMultiplier || "1.00")) || 1))).toLocaleString()}</span>
+            </Badge>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2 mt-auto pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3 min-w-0">
             {/* Only show chat count for admin-created challenges */}
@@ -763,6 +797,9 @@ export function ChallengeCard({
                   {adminDisplayedUsers.map((participant, index) => {
                     const participantSideRaw = participant.side ? String(participant.side).toUpperCase() : null;
                     const participantSide = participantSideRaw === "YES" || participantSideRaw === "NO" ? participantSideRaw : null;
+                    const participantSideLabel = participantSide
+                      ? (isUpDownMarket ? (participantSide === "YES" ? "UP" : "DOWN") : participantSide)
+                      : null;
                     return (
                       <div key={`${participant.id}-${index}`} className="relative flex-shrink-0">
                         <UserAvatar
@@ -773,9 +810,9 @@ export function ChallengeCard({
                           size={16}
                           className="w-4 h-4 ring-1 ring-white dark:ring-slate-800"
                         />
-                        {participantSide && (
+                        {participantSideLabel && (
                           <span className={`absolute -top-1 -right-1 text-[6px] leading-none px-1 py-[1px] rounded-full font-bold ${participantSide === 'YES' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
-                            {participantSide}
+                            {participantSideLabel}
                           </span>
                         )}
                       </div>

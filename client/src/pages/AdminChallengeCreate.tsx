@@ -417,7 +417,7 @@ export default function AdminChallengeCreate() {
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-slate-400">
-                  5% fee deducted from total winnings. Example: ₦2000 pool → ₦1900 to winner, ₦100 to platform.
+                  3% fee deducted from total winnings. Example: ₦2000 pool → ₦1940 to winner, ₦60 to platform.
                 </p>
               </CardContent>
             </Card>

@@ -257,7 +257,7 @@ export default function AdminSettings() {
       registrationEnabled: true,
       minBetAmount: 100,
       maxBetAmount: 100000,
-      platformFeePercentage: 5,
+      platformFeePercentage: 3,
       creatorFeePercentage: 3,
       withdrawalEnabled: true,
       depositEnabled: true,

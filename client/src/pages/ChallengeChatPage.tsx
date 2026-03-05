@@ -13,6 +13,7 @@ import { MessageCircle, Users, Activity, Send, Trophy, DollarSign, UserPlus, Zap
 import { formatDistanceToNow } from "date-fns";
 import { UserAvatar } from "@/components/UserAvatar";
 import P2PChallengeTradePanel from "@/components/P2PChallengeTradePanel";
+import { JoinChallengeModal } from "@/components/JoinChallengeModal";
 
 interface ExtendedMessage {
   id: string;
@@ -79,7 +80,7 @@ interface Challenge {
 export default function ChallengeChatPage() {
   const params = useParams();
   const challengeId = params.id ? parseInt(params.id) : null;
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, login } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [newMessage, setNewMessage] = useState("");
@@ -90,6 +91,11 @@ export default function ChallengeChatPage() {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [showHeaderProofMenu, setShowHeaderProofMenu] = useState(false);
   const [countdownNowMs, setCountdownNowMs] = useState<number>(() => Date.now());
+  const [showUpDownJoinModal, setShowUpDownJoinModal] = useState(false);
+  const [upDownJoinSide, setUpDownJoinSide] = useState<"YES" | "NO">("YES");
+  const [selectedQuickAmount, setSelectedQuickAmount] = useState<"+$1" | "+$5" | "+$10" | "+$100" | "Max" | null>(null);
+  const quickAmountOptions: Array<"+$1" | "+$5" | "+$10" | "+$100" | "Max"> = ["+$1", "+$5", "+$10", "+$100", "Max"];
+  const [upDownStakeAmount, setUpDownStakeAmount] = useState<number>(0);
 
   const getRelativeTime = (value: unknown, fallback = "just now") => {
     if (!value) return fallback;
@@ -111,6 +117,25 @@ export default function ChallengeChatPage() {
     if (!value) return null;
     const normalized = String(value).trim().toUpperCase();
     return normalized === "YES" || normalized === "NO" ? normalized : null;
+  };
+  const isBtcUpDownChallenge = (input?: Partial<Challenge> | null) => {
+    if (!input) return false;
+    const title = String(input.title || "").toLowerCase();
+    const category = String(input.category || "").toLowerCase();
+    return (
+      category === "crypto" &&
+      (title.includes("bitcoin") || title.includes("btc")) &&
+      (
+        title.includes("up or down") ||
+        title.includes("up/down") ||
+        (title.includes("up") && title.includes("down"))
+      )
+    );
+  };
+  const renderSideLabel = (side: "YES" | "NO" | null, asUpDown: boolean) => {
+    if (!side) return null;
+    if (!asUpDown) return side;
+    return side === "YES" ? "UP" : "DOWN";
   };
 
   const formatGameEndsCountdown = (value: unknown): string => {
@@ -139,6 +164,24 @@ export default function ChallengeChatPage() {
     enabled: !!challengeId,
     retry: false,
   });
+  const isBtcUpDownMarket = isBtcUpDownChallenge(challenge);
+  const isAdminUpDownMarket = isBtcUpDownMarket && challenge?.adminCreated === true;
+  const minUpDownStakeAmount = Math.max(1, Number.parseInt(String(challenge?.amount || "0"), 10) || 0);
+
+  useEffect(() => {
+    if (!isAdminUpDownMarket) return;
+    setUpDownStakeAmount(minUpDownStakeAmount);
+    setSelectedQuickAmount(null);
+  }, [challenge?.id, isAdminUpDownMarket, minUpDownStakeAmount]);
+
+  useEffect(() => {
+    if (!isAdminUpDownMarket) return;
+    const params = new URLSearchParams(window.location.search);
+    const side = String(params.get("side") || "").toUpperCase();
+    if (side === "YES" || side === "NO") {
+      setUpDownJoinSide(side);
+    }
+  }, [challenge?.id, isAdminUpDownMarket]);
   
   const isAdminChallenge = challenge?.adminCreated === true;
   const isMatchedUserChallenge = !!(
@@ -197,7 +240,131 @@ export default function ChallengeChatPage() {
   const creatorSide =
     creatorSidePrimary ||
     (challengedSideNormalized ? (challengedSideNormalized === "YES" ? "NO" : "YES") : null);
+  const creatorSideLabel = renderSideLabel(creatorSide, isBtcUpDownMarket);
   const creatorIsOpponent = !!(creatorUser?.id && creatorUser.id === opponentUser?.id);
+  const [btcSeries, setBtcSeries] = useState<number[]>([]);
+  const [btcPrice, setBtcPrice] = useState<number | null>(null);
+  const [btcPriceToBeat, setBtcPriceToBeat] = useState<number | null>(null);
+  const [btcFeedLoading, setBtcFeedLoading] = useState(false);
+  const [btcFeedError, setBtcFeedError] = useState<string | null>(null);
+  const roundDurationMs = 5 * 60 * 1000;
+  const currentRoundStartMs = Math.floor(countdownNowMs / roundDurationMs) * roundDurationMs;
+  const currentRoundEndMs = currentRoundStartMs + roundDurationMs;
+  const upDownRemainingMs = Math.max(currentRoundEndMs - countdownNowMs, 0);
+  const upDownMinutes = Math.floor(upDownRemainingMs / 60000);
+  const upDownSeconds = Math.floor((upDownRemainingMs % 60000) / 1000);
+  const upDownCountdown = `${String(upDownMinutes).padStart(2, "0")}m ${String(upDownSeconds).padStart(2, "0")}s`;
+  const formatUsd = (value: number | null) => {
+    if (!Number.isFinite(value ?? NaN)) return "--";
+    return `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  const formatEtDate = (ms: number) =>
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      month: "long",
+      day: "numeric",
+    }).format(new Date(ms));
+  const formatEtTime = (ms: number) =>
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+      .format(new Date(ms))
+      .replace(" ", "");
+  const upDownWindowLabel = `${formatEtDate(currentRoundStartMs)}, ${formatEtTime(currentRoundStartMs)}-${formatEtTime(currentRoundEndMs)} ET`;
+  const upDownDirectionLabel = (() => {
+    if (btcPriceToBeat === null || btcPrice === null) return "--";
+    return btcPrice >= btcPriceToBeat ? "UP" : "DOWN";
+  })();
+  const btcSparklinePath = (() => {
+    if (btcSeries.length < 2) return "";
+    const min = Math.min(...btcSeries);
+    const max = Math.max(...btcSeries);
+    const range = Math.max(max - min, 1);
+    return btcSeries
+      .map((value, index) => {
+        const x = (index / (btcSeries.length - 1)) * 100;
+        const y = 40 - ((value - min) / range) * 40;
+        return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+      })
+      .join(" ");
+  })();
+
+  useEffect(() => {
+    if (!isAdminUpDownMarket) {
+      setBtcSeries([]);
+      setBtcPrice(null);
+      setBtcPriceToBeat(null);
+      setBtcFeedError(null);
+      setBtcFeedLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadBtc = async () => {
+      try {
+        setBtcFeedLoading(true);
+        const response = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=60");
+        if (!response.ok) {
+          throw new Error(`BTC feed unavailable (${response.status})`);
+        }
+        const raw = await response.json();
+        if (!Array.isArray(raw)) {
+          throw new Error("Invalid BTC feed payload");
+        }
+
+        const candles = raw
+          .map((item: any) => ({
+            openTime: Number(item?.[0]),
+            closeTime: Number(item?.[6]),
+            open: Number(item?.[1]),
+            close: Number(item?.[4]),
+          }))
+          .filter((item: any) =>
+            Number.isFinite(item.openTime) &&
+            Number.isFinite(item.closeTime) &&
+            Number.isFinite(item.open) &&
+            Number.isFinite(item.close),
+          );
+
+        if (candles.length === 0) {
+          throw new Error("No BTC candles available");
+        }
+
+        const latestClose = candles[candles.length - 1].close;
+        const roundCandle =
+          candles.find((candle: any) => candle.openTime === currentRoundStartMs) ||
+          candles.find((candle: any) => candle.openTime <= currentRoundStartMs && currentRoundStartMs < candle.closeTime) ||
+          candles[candles.length - 1];
+
+        if (!cancelled) {
+          setBtcSeries(candles.slice(-30).map((item: any) => item.close));
+          setBtcPrice(latestClose);
+          setBtcPriceToBeat(roundCandle?.open ?? null);
+          setBtcFeedError(null);
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          setBtcFeedError(error?.message || "Live BTC feed unavailable");
+        }
+      } finally {
+        if (!cancelled) {
+          setBtcFeedLoading(false);
+        }
+      }
+    };
+
+    loadBtc();
+    const interval = window.setInterval(loadBtc, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [isAdminUpDownMarket, currentRoundStartMs]);
   
   // Keep the selected tab valid as access context changes.
   useEffect(() => {
@@ -262,6 +429,26 @@ export default function ChallengeChatPage() {
     enabled: !!challengeId,
     retry: false,
   });
+  const { data: walletBalance = 0 } = useQuery<number>({
+    queryKey: ["/api/wallet/balance"],
+    enabled: !!user?.id,
+    retry: false,
+    refetchInterval: 5000,
+  });
+
+  const handleQuickAmountPick = (option: "+$1" | "+$5" | "+$10" | "+$100" | "Max") => {
+    setSelectedQuickAmount(option);
+    setUpDownStakeAmount((prev) => {
+      const current = prev > 0 ? prev : minUpDownStakeAmount;
+      if (option === "Max") {
+        const maxFromWallet = Math.floor(Number(walletBalance || 0));
+        return maxFromWallet > 0 ? maxFromWallet : current;
+      }
+      const increment = Number.parseInt(option.replace("+$", ""), 10);
+      if (!Number.isFinite(increment) || increment <= 0) return current;
+      return current + increment;
+    });
+  };
   useEffect(() => {
     if (!challengeId) return;
     
@@ -619,9 +806,9 @@ export default function ChallengeChatPage() {
                 <div className="min-w-0">
                   <p className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate flex items-center gap-1.5">
                     <span className="truncate">{opponentName || "Counterparty"}</span>
-                    {creatorIsOpponent && creatorSide && (
+                    {creatorIsOpponent && creatorSideLabel && (
                       <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] leading-none font-bold ${creatorSide === "YES" ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>
-                        {creatorSide}
+                        {creatorSideLabel}
                       </span>
                     )}
                   </p>
@@ -632,11 +819,11 @@ export default function ChallengeChatPage() {
                     </span>
                     <span>•</span>
                     <span className="truncate">{challenge?.title || "Challenge Chat"}</span>
-                    {!creatorIsOpponent && creatorSide && (
+                    {!creatorIsOpponent && creatorSideLabel && (
                       <>
                         <span>•</span>
                         <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] leading-none font-bold ${creatorSide === "YES" ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>
-                          {creatorSide}
+                          {creatorSideLabel}
                         </span>
                       </>
                     )}
@@ -911,47 +1098,204 @@ export default function ChallengeChatPage() {
   return (
     <>
     <div className="h-[calc(100dvh-3rem)] md:h-[calc(100dvh-4rem)] min-h-[calc(100dvh-3rem)] md:min-h-[calc(100dvh-4rem)] overflow-hidden bg-slate-50 dark:bg-slate-900 flex flex-col">
-      <div className="h-full flex flex-col overflow-hidden max-w-4xl mx-auto w-full">
+      <div className={`h-full flex flex-col overflow-hidden ${isAdminUpDownMarket ? "max-w-6xl" : "max-w-4xl"} mx-auto w-full`}>
         {/* Challenge Banner */}
         {challenge && (
-          <div className="relative h-24 sm:h-28 bg-gradient-to-b from-slate-200 to-slate-100 dark:from-slate-800 dark:to-slate-900 overflow-hidden rounded-lg mx-2 mt-2">
-            {challenge.coverImageUrl ? (
-              <img
-                src={challenge.coverImageUrl}
-                alt={challenge.title}
-                className="w-full h-full object-cover rounded-lg"
-              />
-            ) : (
-              <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center rounded-lg">
-                <div className="text-center">
-                  <Trophy className="w-8 h-8 text-white mx-auto mb-2 opacity-80" />
-                  <p className="text-white text-xs opacity-70">Challenge</p>
-                </div>
-              </div>
-            )}
-            {/* Overlay */}
-            <div className="absolute inset-0 bg-black/20 dark:bg-black/40 rounded-lg"></div>
-            
-            {/* Challenge Info */}
-            <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3">
-              <div className="text-white drop-shadow-lg">
-                <h1 className="text-sm sm:text-base font-bold truncate">{challenge.title}</h1>
-              </div>
-              <div className="text-white drop-shadow-lg text-[10px] sm:text-xs space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="bg-white/20 px-2 py-0.5 rounded-full capitalize">{challenge.category}</span>
-                  <span className="bg-white/20 px-2 py-0.5 rounded-full font-bold">â‚¦{parseInt(challenge.amount).toLocaleString()}</span>
-                  <span className="bg-white/20 px-2 py-0.5 rounded-full capitalize">{challenge.status}</span>
-                  <span className="bg-white/20 px-2 py-0.5 rounded-full">
-                    {getRelativeTime(challenge.dueDate, "time unknown")}
+          isAdminUpDownMarket ? (
+            <div className="mx-2 mt-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden">
+              <div className="px-3 sm:px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-amber-500 text-white text-xl font-black flex items-center justify-center shadow-sm flex-shrink-0">
+                      ₿
+                    </div>
+                    <div className="min-w-0">
+                      <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 truncate">
+                        {challenge.title}
+                      </h1>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">{upDownWindowLabel}</p>
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold px-2 py-1">
+                    <span className="relative inline-flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                    </span>
+                    LIVE
                   </span>
                 </div>
-                {challenge.description && (
-                  <p className="text-white/80 line-clamp-1">{challenge.description}</p>
-                )}
+              </div>
+
+              <div className="px-3 sm:px-4 py-3">
+                <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-3">
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-3">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                      <span className="uppercase tracking-wide">price to beat</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">{formatUsd(btcPriceToBeat)}</span>
+                    </div>
+                    <div className="mt-1.5 flex items-end justify-between">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">current price</p>
+                        <p className="text-lg sm:text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{formatUsd(btcPrice)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">countdown</p>
+                        <p className="text-sm font-bold text-slate-900 dark:text-slate-100 tabular-nums">{upDownCountdown}</p>
+                      </div>
+                    </div>
+                    <div className="mt-2 h-12 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-1">
+                      {btcSparklinePath ? (
+                        <svg viewBox="0 0 100 40" className="w-full h-full">
+                          <path
+                            d={btcSparklinePath}
+                            fill="none"
+                            stroke={upDownDirectionLabel === "UP" ? "#16a34a" : upDownDirectionLabel === "DOWN" ? "#dc2626" : "#64748b"}
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      ) : (
+                        <div className="h-full rounded bg-slate-100 dark:bg-slate-700" />
+                      )}
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                      {btcFeedLoading ? "Loading live BTC feed..." : (btcFeedError ? "Live BTC feed unavailable right now." : "Resolution: UP when close >= open, else DOWN.")}
+                    </p>
+                  </div>
+
+                  <aside className="hidden xl:flex flex-col rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setUpDownJoinSide("YES")}
+                        className={`h-10 rounded-full border text-sm font-bold transition-colors ${
+                          upDownJoinSide === "YES"
+                            ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                            : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        Up
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUpDownJoinSide("NO")}
+                        className={`h-10 rounded-full border text-sm font-bold transition-colors ${
+                          upDownJoinSide === "NO"
+                            ? "border-red-500 bg-red-500/15 text-red-700 dark:text-red-300"
+                            : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        Down
+                      </button>
+                    </div>
+
+                    <div className="mt-3 rounded-lg border border-slate-200 dark:border-slate-700 p-3 flex items-center justify-end">
+                      <div className="w-36">
+                        <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 flex items-center gap-1.5">
+                          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">NGN</span>
+                          <Input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={upDownStakeAmount > 0 ? upDownStakeAmount : ""}
+                            onChange={(e) => {
+                              const nextValue = Number.parseInt(e.target.value, 10);
+                              setSelectedQuickAmount(null);
+                              if (!Number.isFinite(nextValue) || nextValue <= 0) {
+                                setUpDownStakeAmount(0);
+                                return;
+                              }
+                              setUpDownStakeAmount(nextValue);
+                            }}
+                            className="h-6 border-0 bg-transparent p-0 text-right text-base font-black text-slate-900 dark:text-slate-100 focus-visible:ring-0 focus-visible:ring-offset-0"
+                            aria-label="Trade amount in NGN"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-5 gap-1">
+                      {quickAmountOptions.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => handleQuickAmountPick(option)}
+                          className={`h-7 rounded-md border text-[11px] font-bold transition-colors ${
+                            selectedQuickAmount === option
+                              ? "border-slate-900 dark:border-slate-100 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
+                              : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600"
+                          }`}
+                          aria-label={`Quick amount ${option}`}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+
+                    <Button
+                      className="mt-4 h-11 text-sm font-bold"
+                      onClick={() => {
+                        if (!isAuthenticated) {
+                          login();
+                          return;
+                        }
+                        const effectiveStake = upDownStakeAmount > 0 ? upDownStakeAmount : minUpDownStakeAmount;
+                        if (effectiveStake < minUpDownStakeAmount) {
+                          toast({
+                            title: "Invalid amount",
+                            description: `Minimum entry is NGN ${minUpDownStakeAmount.toLocaleString()}`,
+                            variant: "destructive",
+                          });
+                          return;
+                        }
+                        setShowUpDownJoinModal(true);
+                      }}
+                    >
+                      {isAuthenticated ? "Trade Now" : "Sign in to trade"}
+                    </Button>
+                  </aside>
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="relative h-24 sm:h-28 bg-gradient-to-b from-slate-200 to-slate-100 dark:from-slate-800 dark:to-slate-900 overflow-hidden rounded-lg mx-2 mt-2">
+              {challenge.coverImageUrl ? (
+                <img
+                  src={challenge.coverImageUrl}
+                  alt={challenge.title}
+                  className="w-full h-full object-cover rounded-lg"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center rounded-lg">
+                  <div className="text-center">
+                    <Trophy className="w-8 h-8 text-white mx-auto mb-2 opacity-80" />
+                    <p className="text-white text-xs opacity-70">Challenge</p>
+                  </div>
+                </div>
+              )}
+              <div className="absolute inset-0 bg-black/20 dark:bg-black/40 rounded-lg"></div>
+
+              <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3">
+                <div className="text-white drop-shadow-lg">
+                  <h1 className="text-sm sm:text-base font-bold truncate">{challenge.title}</h1>
+                </div>
+                <div className="text-white drop-shadow-lg text-[10px] sm:text-xs space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="bg-white/20 px-2 py-0.5 rounded-full capitalize">{challenge.category}</span>
+                    <span className="bg-white/20 px-2 py-0.5 rounded-full font-bold">₦{parseInt(challenge.amount).toLocaleString()}</span>
+                    <span className="bg-white/20 px-2 py-0.5 rounded-full capitalize">{challenge.status}</span>
+                    <span className="bg-white/20 px-2 py-0.5 rounded-full">
+                      {getRelativeTime(challenge.dueDate, "time unknown")}
+                    </span>
+                  </div>
+                  {challenge.description && (
+                    <p className="text-white/80 line-clamp-1">{challenge.description}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
         )}
         
         <Tabs value={activeTab} onValueChange={(value: any) => setActiveTab(value)} className="flex-1 flex flex-col overflow-hidden">
@@ -1214,7 +1558,7 @@ export default function ChallengeChatPage() {
                   onClick={() => setReplyingTo(null)}
                   className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
                 >
-                  âœ•
+                  x
                 </button>
               </div>
             )}
@@ -1241,6 +1585,21 @@ export default function ChallengeChatPage() {
         )}
         
         {selectedProfileUserId && <ProfileCard userId={selectedProfileUserId} onClose={() => setSelectedProfileUserId(null)} />}
+        {isAdminUpDownMarket && (
+          <JoinChallengeModal
+            isOpen={showUpDownJoinModal}
+            onClose={() => setShowUpDownJoinModal(false)}
+            challenge={{
+              id: challenge.id,
+              title: challenge.title,
+              category: challenge.category,
+              amount: String(upDownStakeAmount > 0 ? upDownStakeAmount : minUpDownStakeAmount),
+              description: challenge.description,
+              selectedSide: upDownJoinSide,
+            }}
+            userBalance={Number(walletBalance || 0)}
+          />
+        )}
       </div>
     </div>
     </>

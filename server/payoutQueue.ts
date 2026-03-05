@@ -1,6 +1,6 @@
 import { db } from './db';
 import { payoutJobs, payoutEntries, challenges } from '../shared/schema';
-import { eq, and, lte } from 'drizzle-orm';
+import { eq, and, lte, or } from 'drizzle-orm';
 
 /**
  * Payout Queue Management System
@@ -219,7 +219,12 @@ export class PayoutQueue {
       const jobs = await db
         .select()
         .from(payoutJobs)
-        .where(eq(payoutJobs.status, 'queued'));
+        .where(
+          or(
+            eq(payoutJobs.status, 'queued'),
+            eq(payoutJobs.status, 'running')
+          )
+        );
 
       return jobs;
     } catch (error) {

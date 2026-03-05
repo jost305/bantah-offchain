@@ -449,7 +449,7 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
 
       if (winners.length > 0) {
         const totalPool = totalWinningStake + totalLosing;
-        const platformFee = BigInt(Math.floor(Number(totalPool) * 0.05));
+        const platformFee = BigInt(Math.floor(Number(totalPool) * 0.03));
         const winnerPool = totalPool - platformFee;
 
         const amountPerWinner = winnerPool / BigInt(winners.length);
@@ -3021,14 +3021,15 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
     }
   });
 
-  app.get('/api/challenges', PrivyAuthMiddleware, async (req: AuthenticatedRequest, res) => {
+  app.get('/api/challenges', async (req: AuthenticatedRequest, res) => {
     try {
-      const userId = getUserId(req);
       // Check if requesting all challenges (public feed) or user-specific challenges
       const feedType = req.query.feed as string;
-      const challenges = feedType === 'all' 
-        ? await storage.getAllChallengesFeed(100)
-        : await storage.getChallenges(userId);
+      const hasAuthedUser = Boolean(req.user?.id);
+      const challenges =
+        feedType === 'all' || !hasAuthedUser
+          ? await storage.getAllChallengesFeed(100)
+          : await storage.getChallenges(getUserId(req));
       res.json(challenges);
     } catch (error) {
       console.error("Error fetching challenges:", error);
@@ -3326,8 +3327,9 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
       }
 
       // Broadcast to Telegram channel
-      if (telegramBot && challenger?.telegramId) {
+      if (telegramBot) {
         try {
+          const stakeAmount = parseFloat(challenge.amount.toString());
           await telegramBot.broadcastChallenge({
             id: challenge.id,
             title: challenge.title,
@@ -3340,7 +3342,9 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
               name: challenged?.firstName || challenged?.username || 'Open Challenge',
               username: challenged?.username || undefined,
             },
-            stake_amount: parseFloat(challenge.amount.toString()),
+            stake_amount: stakeAmount,
+            stake_display: `NGN ${stakeAmount.toLocaleString()}`,
+            settlement_label: 'Offchain (NGN)',
             status: challenge.status,
             end_time: challenge.dueDate,
             category: challenge.category,
@@ -4886,6 +4890,38 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
             hasMetadata: !!metadata,
             userId: metadata?.userId
           });
+        }
+      } else if (
+        event.event === 'transfer.success' ||
+        event.event === 'transfer.failed' ||
+        event.event === 'transfer.reversed'
+      ) {
+        const transferReference = event?.data?.reference;
+        if (!transferReference) {
+          console.log('Transfer webhook missing reference');
+        } else {
+          const nextStatus =
+            event.event === 'transfer.success'
+              ? 'completed'
+              : 'failed';
+
+          const reason =
+            event?.data?.complete_message ||
+            event?.data?.reason ||
+            event?.data?.failure_reason ||
+            event.event;
+
+          await db
+            .update(adminWalletTransactions)
+            .set({
+              status: nextStatus,
+              description: `Admin withdrawal via Paystack (${reason})`,
+            })
+            .where(eq(adminWalletTransactions.reference, transferReference));
+
+          console.log(
+            `Updated admin withdrawal ${transferReference} to status ${nextStatus} from webhook event ${event.event}`
+          );
         }
       } else {
         console.log('Webhook event not charge.success:', event.event);
@@ -6490,6 +6526,7 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
       if (telegramBot) {
         try {
           const admin = await storage.getUser((req as any).user?.id);
+          const stakeAmount = parseFloat(String(challenge.amount || '0'));
           await telegramBot.broadcastChallenge({
             id: challenge.id,
             title: challenge.title,
@@ -6498,7 +6535,9 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
               name: admin?.firstName || admin?.username || 'Admin',
               username: admin?.username || undefined,
             },
-            stake_amount: parseFloat(String(challenge.amount || '0')),
+            stake_amount: stakeAmount,
+            stake_display: `NGN ${stakeAmount.toLocaleString()}`,
+            settlement_label: 'Offchain (NGN)',
             status: challenge.status,
             end_time: challenge.dueDate,
             category: category,
@@ -6982,10 +7021,17 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
   // Admin Wallet - Withdraw funds
   app.post('/api/admin/wallet/withdraw', adminAuth, async (req: AdminAuthRequest, res) => {
     try {
-      const { amount } = req.body;
+      const {
+        amount,
+        recipientCode,
+        accountNumber,
+        bankCode,
+        accountName,
+      } = req.body || {};
       const adminId = req.user.id;
+      const withdrawalAmount = Number(amount);
 
-      if (!amount || amount <= 0) {
+      if (!Number.isFinite(withdrawalAmount) || withdrawalAmount <= 0) {
         return res.status(400).json({ message: "Invalid amount" });
       }
 
@@ -7004,55 +7050,230 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
 
       const currentBalance = parseFloat(String(admin.adminWalletBalance || '0'));
 
-      if (currentBalance < amount) {
+      if (currentBalance < withdrawalAmount) {
         return res.status(400).json({ 
-          message: `Insufficient balance. Have â‚¦${currentBalance.toLocaleString()}, need â‚¦${amount.toLocaleString()}` 
+          message: `Insufficient balance. Have â‚¦${currentBalance.toLocaleString()}, need â‚¦${withdrawalAmount.toLocaleString()}` 
         });
       }
-
-      // For production: Check if admin has bank details stored
-      // TODO: Store and retrieve admin's bank account details
-      // For now, return message that they need to set up their bank account
-      
-      console.log(`Processing withdrawal for admin ${adminId}: â‚¦${amount}`);
-
-      // Deduct from balance first
-      const newBalance = currentBalance - amount;
-
-      await db
-        .update(users)
-        .set({ adminWalletBalance: newBalance.toString() })
-        .where(eq(users.id, adminId));
 
       // Generate withdrawal reference
       const withdrawalRef = `adm_withdrawal_${adminId}_${Date.now()}`;
 
-      // Log transaction as pending (awaiting bank processing)
-      await db.insert(adminWalletTransactions).values({
-        adminId,
-        type: 'withdrawal',
-        amount: amount.toString(),
-        description: `Withdrawal from admin wallet to bank account`,
-        reference: withdrawalRef,
-        status: 'pending',
-        balanceBefore: currentBalance.toString(),
-        balanceAfter: newBalance.toString(),
+      // Auto-transfer can be enabled by:
+      // 1) providing recipientCode in request body
+      // 2) setting PAYSTACK_ADMIN_RECIPIENT_CODE in env
+      // 3) providing bank details (accountNumber + bankCode + accountName) in request body
+      const recipientCodeFromBody =
+        typeof recipientCode === "string" ? recipientCode.trim() : "";
+      const envRecipientCode =
+        typeof process.env.PAYSTACK_ADMIN_RECIPIENT_CODE === "string"
+          ? process.env.PAYSTACK_ADMIN_RECIPIENT_CODE.trim()
+          : "";
+
+      const accountNumberSanitized =
+        typeof accountNumber === "string" ? accountNumber.replace(/\D/g, "") : "";
+      const bankCodeSanitized =
+        typeof bankCode === "string" ? bankCode.trim() : "";
+      const accountNameSanitized =
+        typeof accountName === "string" ? accountName.trim() : "";
+
+      const hasBankDetails =
+        accountNumberSanitized.length >= 10 &&
+        bankCodeSanitized.length > 0 &&
+        accountNameSanitized.length > 0;
+
+      const autoTransferEnabled =
+        recipientCodeFromBody.length > 0 ||
+        envRecipientCode.length > 0 ||
+        hasBankDetails;
+
+      console.log(
+        `Processing admin withdrawal ${withdrawalRef} for ${adminId}: â‚¦${withdrawalAmount}`
+      );
+
+      const newBalance = currentBalance - withdrawalAmount;
+      let withdrawalTxId: number | null = null;
+
+      // Reserve funds first so the wallet reflects pending transfer immediately.
+      await db.transaction(async (tx) => {
+        await tx
+          .update(users)
+          .set({ adminWalletBalance: newBalance.toFixed(2) })
+          .where(eq(users.id, adminId));
+
+        const insertedTx = await tx
+          .insert(adminWalletTransactions)
+          .values({
+            adminId,
+            type: 'withdrawal',
+            amount: withdrawalAmount.toFixed(2),
+            description: autoTransferEnabled
+              ? `Admin withdrawal via Paystack transfer`
+              : `Withdrawal from admin wallet to bank account`,
+            reference: withdrawalRef,
+            status: 'pending',
+            balanceBefore: currentBalance.toFixed(2),
+            balanceAfter: newBalance.toFixed(2),
+          })
+          .returning({ id: adminWalletTransactions.id });
+
+        withdrawalTxId = insertedTx[0]?.id ?? null;
       });
 
-      // In production, this would:
-      // 1. Create transfer recipient in Paystack using stored bank details
-      // 2. Initiate transfer using Paystack Transfer API
-      // 3. Update transaction status to 'processing'
-      // 4. Handle webhooks for transfer completion
-      
-      // For now, return pending status with instructions
-      res.json({
-        message: 'Withdrawal initiated - funds pending to your registered bank account',
-        amount: amount,
+      // Manual fallback mode if no recipient/bank details configured.
+      if (!autoTransferEnabled) {
+        return res.json({
+          message: 'Withdrawal initiated - funds pending to your bank account',
+          amount: withdrawalAmount,
+          balance: newBalance,
+          reference: withdrawalRef,
+          status: 'pending',
+          note: 'Auto-transfer is not configured yet. Set PAYSTACK_ADMIN_RECIPIENT_CODE (or provide bank details) to enable direct Paystack transfers.',
+        });
+      }
+
+      // Resolve recipient code
+      let resolvedRecipientCode = recipientCodeFromBody || envRecipientCode;
+
+      // If no recipient code was provided, create one from bank details.
+      if (!resolvedRecipientCode && hasBankDetails) {
+        const recipientResponse = await fetch('https://api.paystack.co/transferrecipient', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'nuban',
+            name: accountNameSanitized,
+            account_number: accountNumberSanitized,
+            bank_code: bankCodeSanitized,
+            currency: 'NGN',
+          }),
+        });
+
+        const recipientData = await recipientResponse.json();
+        if (!recipientData?.status || !recipientData?.data?.recipient_code) {
+          // Rollback wallet reservation if recipient creation fails.
+          await db.transaction(async (tx) => {
+            await tx
+              .update(users)
+              .set({ adminWalletBalance: currentBalance.toFixed(2) })
+              .where(eq(users.id, adminId));
+
+            if (withdrawalTxId) {
+              await tx
+                .update(adminWalletTransactions)
+                .set({
+                  status: 'failed',
+                  description: `Withdrawal failed: ${recipientData?.message || 'Unable to create transfer recipient'}`,
+                  balanceAfter: currentBalance.toFixed(2),
+                })
+                .where(eq(adminWalletTransactions.id, withdrawalTxId));
+            }
+          });
+
+          return res.status(400).json({
+            message: recipientData?.message || 'Failed to create Paystack transfer recipient',
+          });
+        }
+
+        resolvedRecipientCode = String(recipientData.data.recipient_code);
+      }
+
+      if (!resolvedRecipientCode) {
+        // Rollback wallet reservation if we still don't have recipient info.
+        await db.transaction(async (tx) => {
+          await tx
+            .update(users)
+            .set({ adminWalletBalance: currentBalance.toFixed(2) })
+            .where(eq(users.id, adminId));
+
+          if (withdrawalTxId) {
+            await tx
+              .update(adminWalletTransactions)
+              .set({
+                status: 'failed',
+                description: 'Withdrawal failed: recipient not configured',
+                balanceAfter: currentBalance.toFixed(2),
+              })
+              .where(eq(adminWalletTransactions.id, withdrawalTxId));
+          }
+        });
+
+        return res.status(400).json({
+          message: 'Recipient not configured. Provide recipientCode or bank details, or set PAYSTACK_ADMIN_RECIPIENT_CODE.',
+        });
+      }
+
+      // Initiate Paystack transfer
+      const transferResponse = await fetch('https://api.paystack.co/transfer', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          source: 'balance',
+          reason: `Admin withdrawal ${withdrawalRef}`,
+          amount: Math.round(withdrawalAmount * 100), // kobo
+          recipient: resolvedRecipientCode,
+          reference: withdrawalRef,
+        }),
+      });
+
+      const transferData = await transferResponse.json();
+      if (!transferData?.status) {
+        // Rollback wallet reservation if transfer initiation fails.
+        await db.transaction(async (tx) => {
+          await tx
+            .update(users)
+            .set({ adminWalletBalance: currentBalance.toFixed(2) })
+            .where(eq(users.id, adminId));
+
+          if (withdrawalTxId) {
+            await tx
+              .update(adminWalletTransactions)
+              .set({
+                status: 'failed',
+                description: `Withdrawal failed: ${transferData?.message || 'Paystack transfer initiation failed'}`,
+                balanceAfter: currentBalance.toFixed(2),
+              })
+              .where(eq(adminWalletTransactions.id, withdrawalTxId));
+          }
+        });
+
+        return res.status(400).json({
+          message: transferData?.message || 'Failed to initiate Paystack transfer',
+        });
+      }
+
+      const paystackTransferStatus =
+        String(transferData?.data?.status || '').toLowerCase() === 'success'
+          ? 'completed'
+          : 'pending';
+
+      if (withdrawalTxId) {
+        await db
+          .update(adminWalletTransactions)
+          .set({
+            status: paystackTransferStatus,
+            description: `Admin withdrawal via Paystack transfer (${transferData?.data?.status || 'pending'})`,
+          })
+          .where(eq(adminWalletTransactions.id, withdrawalTxId));
+      }
+
+      return res.json({
+        message:
+          paystackTransferStatus === 'completed'
+            ? 'Withdrawal completed via Paystack transfer'
+            : 'Withdrawal transfer initiated via Paystack',
+        amount: withdrawalAmount,
         balance: newBalance,
         reference: withdrawalRef,
-        status: 'pending',
-        note: 'This withdrawal will be processed to your bank account. Please allow 1-3 business days for the funds to arrive.'
+        status: paystackTransferStatus,
+        note: 'Transfer status will be finalized via Paystack webhook updates.',
+        transferCode: transferData?.data?.transfer_code || null,
       });
     } catch (error) {
       console.error("Error withdrawing funds:", error);
@@ -7599,7 +7820,7 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
   setupOGImageRoutes(app, storage);
 
   // Add leaderboard endpoint
-  app.get("/api/leaderboard", PrivyAuthMiddleware, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/leaderboard", async (_req, res) => {
     try {
       const leaderboard = await storage.getLeaderboard();
       console.log(`Leaderboard query returned ${leaderboard.length} users`);
@@ -7745,7 +7966,23 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
         return res.status(400).json({ message: "Invalid stake amount. Must be positive integer" });
       }
 
-      if (stakeAmount !== requiredAmount) {
+      const challengeTitleLower = String(challenge.title || "").toLowerCase();
+      const isUpDownMarket =
+        String(challenge.category || "").toLowerCase() === "crypto" &&
+        (challengeTitleLower.includes("bitcoin") || challengeTitleLower.includes("btc")) &&
+        (
+          challengeTitleLower.includes("up or down") ||
+          challengeTitleLower.includes("up/down") ||
+          (challengeTitleLower.includes("up") && challengeTitleLower.includes("down"))
+        );
+
+      if (isUpDownMarket) {
+        if (stakeAmount < requiredAmount) {
+          return res.status(400).json({
+            message: `Invalid stake amount. Minimum stake for this challenge is NGN ${requiredAmount.toLocaleString()}`,
+          });
+        }
+      } else if (stakeAmount !== requiredAmount) {
         return res.status(400).json({
           message: `Invalid stake amount. This challenge requires exactly NGN ${requiredAmount.toLocaleString()}`,
         });

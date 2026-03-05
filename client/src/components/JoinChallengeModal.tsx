@@ -39,15 +39,109 @@ export function JoinChallengeModal({
   const queryClient = useQueryClient();
   const [selectedSide, setSelectedSide] = useState<"YES" | "NO" | null>(normalizeSide(challenge.selectedSide));
   const [isWaiting, setIsWaiting] = useState(false);
+  const [btcSeries, setBtcSeries] = useState<number[]>([]);
+  const [btcPrice, setBtcPrice] = useState<number | null>(null);
+  const [btcDelta, setBtcDelta] = useState<number | null>(null);
+  const [btcLoading, setBtcLoading] = useState(false);
+  const [btcError, setBtcError] = useState<string | null>(null);
+
+  const challengeTitleLower = String(challenge.title || "").toLowerCase();
+  const isUpDownMarket =
+    String(challenge.category || "").toLowerCase() === "crypto" &&
+    (challengeTitleLower.includes("bitcoin") || challengeTitleLower.includes("btc")) &&
+    (
+      challengeTitleLower.includes("up or down") ||
+      challengeTitleLower.includes("up/down") ||
+      (challengeTitleLower.includes("up") && challengeTitleLower.includes("down"))
+    );
+  const positiveSideLabel = isUpDownMarket ? "UP" : "YES";
+  const negativeSideLabel = isUpDownMarket ? "DOWN" : "NO";
 
   useEffect(() => {
     if (!isOpen) return;
     setSelectedSide(normalizeSide(challenge.selectedSide));
   }, [challenge.id, challenge.selectedSide, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || !isUpDownMarket) {
+      setBtcSeries([]);
+      setBtcPrice(null);
+      setBtcDelta(null);
+      setBtcError(null);
+      setBtcLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const fetchBtcData = async () => {
+      try {
+        setBtcLoading(true);
+        const response = await fetch(
+          "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=20",
+        );
+        if (!response.ok) {
+          throw new Error(`BTC feed unavailable (${response.status})`);
+        }
+
+        const raw = await response.json();
+        if (!Array.isArray(raw)) {
+          throw new Error("Invalid BTC feed payload");
+        }
+
+        const closes = raw
+          .map((item: any) => Number(item?.[4]))
+          .filter((value: number) => Number.isFinite(value));
+
+        if (closes.length < 2) {
+          throw new Error("Insufficient BTC data");
+        }
+
+        const latest = closes[closes.length - 1];
+        const previous = closes[closes.length - 2];
+
+        if (!isCancelled) {
+          setBtcSeries(closes);
+          setBtcPrice(latest);
+          setBtcDelta(latest - previous);
+          setBtcError(null);
+        }
+      } catch (error: any) {
+        if (!isCancelled) {
+          setBtcError(error?.message || "Live BTC feed unavailable");
+        }
+      } finally {
+        if (!isCancelled) {
+          setBtcLoading(false);
+        }
+      }
+    };
+
+    fetchBtcData();
+    const interval = setInterval(fetchBtcData, 15000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [isOpen, isUpDownMarket]);
+
   const stakeAmount = Number.parseInt(String(challenge.amount || "0"), 10) || 0;
   const potentialWin = stakeAmount * 2;
   const normalizedBalance = Number(userBalance || 0);
+  const sparklinePath = (() => {
+    if (btcSeries.length < 2) return "";
+    const min = Math.min(...btcSeries);
+    const max = Math.max(...btcSeries);
+    const range = Math.max(max - min, 1);
+    return btcSeries
+      .map((value, index) => {
+        const x = (index / (btcSeries.length - 1)) * 100;
+        const y = 24 - ((value - min) / range) * 24;
+        return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+      })
+      .join(" ");
+  })();
 
   const getCategoryEmoji = (category: string) => {
     const cats: Record<string, string> = {
@@ -124,7 +218,7 @@ export function JoinChallengeModal({
   const joinMutation = useMutation({
     mutationFn: async () => {
       if (!selectedSide) {
-        throw new Error("Please select YES or NO");
+        throw new Error(`Please select ${positiveSideLabel} or ${negativeSideLabel}`);
       }
 
       if (stakeAmount <= 0) {
@@ -184,9 +278,11 @@ export function JoinChallengeModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
             <Zap className="w-4 h-4 text-yellow-500" />
-            Join Challenge
+            {isUpDownMarket ? "Join 5m Market" : "Join Challenge"}
           </DialogTitle>
-          <DialogDescription className="text-xs text-slate-500">Pick your side and lock stake</DialogDescription>
+          <DialogDescription className="text-xs text-slate-500">
+            {isUpDownMarket ? "Pick a direction and lock stake" : "Pick your side and lock stake"}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -238,11 +334,55 @@ export function JoinChallengeModal({
           </div>
 
           <div className="bg-primary px-3 py-1.5 rounded-t-md flex items-center justify-between">
-            <span className="text-[10px] font-black text-white uppercase tracking-wider">Your Claim</span>
+            <span className="text-[10px] font-black text-white uppercase tracking-wider">
+              {isUpDownMarket ? "Your Direction" : "Your Claim"}
+            </span>
             <Trophy className="w-3 h-3 text-white/40" />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 -mt-4">
+          {isUpDownMarket && (
+            <div className="border border-slate-200 dark:border-slate-700 rounded-md p-2 bg-slate-50 dark:bg-slate-900/40 -mt-4">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1 text-[10px] font-semibold text-slate-700 dark:text-slate-200">
+                  <span className="relative inline-flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                  </span>
+                  BTC Live (1m)
+                </div>
+                <div className="text-[10px] font-semibold text-slate-700 dark:text-slate-200">
+                  {btcPrice
+                    ? `$${btcPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                    : "--"}
+                </div>
+              </div>
+              {sparklinePath ? (
+                <svg viewBox="0 0 100 24" className="w-full h-8">
+                  <path
+                    d={sparklinePath}
+                    fill="none"
+                    stroke={btcDelta !== null && btcDelta >= 0 ? "#16a34a" : "#dc2626"}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : (
+                <div className="h-8 rounded bg-slate-100 dark:bg-slate-800" />
+              )}
+              <div className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                {btcLoading
+                  ? "Loading live BTC movement..."
+                  : btcError
+                    ? "Live BTC chart unavailable right now."
+                    : btcDelta !== null
+                      ? `Last 1m move: ${btcDelta >= 0 ? "+" : ""}${btcDelta.toFixed(2)}`
+                      : "Live BTC movement"}
+              </div>
+            </div>
+          )}
+
+          <div className={`grid grid-cols-2 gap-2 ${isUpDownMarket ? "" : "-mt-4"}`}>
             <button
               onClick={() => setSelectedSide("YES")}
               className={`py-2 rounded-md text-sm font-semibold transition-all ${
@@ -252,7 +392,7 @@ export function JoinChallengeModal({
               }`}
               data-testid="button-choice-yes"
             >
-              YES
+              {positiveSideLabel}
             </button>
             <button
               onClick={() => setSelectedSide("NO")}
@@ -263,7 +403,7 @@ export function JoinChallengeModal({
               }`}
               data-testid="button-choice-no"
             >
-              NO
+              {negativeSideLabel}
             </button>
           </div>
 

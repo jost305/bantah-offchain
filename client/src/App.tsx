@@ -73,7 +73,20 @@ import ChallengeChatPage from "./pages/ChallengeChatPage";
 import { PrivyProvider } from '@privy-io/react-auth';
 import { privyConfig } from './lib/privyConfig';
 
-const Challenges = lazy(() => import("./pages/Challenges"));
+const MissingChallengesPage = () => (
+  <div className="min-h-[40vh] flex items-center justify-center px-4">
+    <div className="text-center text-slate-600 dark:text-slate-300">
+      <p className="font-semibold">Challenges page is unavailable.</p>
+      <p className="text-xs mt-1">Restore default export in client/src/pages/Challenges.tsx.</p>
+    </div>
+  </div>
+);
+
+const Challenges = lazy(() =>
+  import("./pages/ChallengesRestored").then((mod: any) => ({
+    default: typeof mod?.default === "function" ? mod.default : MissingChallengesPage,
+  }))
+);
 const Leaderboard = lazy(() => import("./pages/Leaderboard"));
 const PartnerPrograms = lazy(() => import("./pages/PartnerPrograms"));
 const PartnerSignup = lazy(() => import("./pages/PartnerSignup"));

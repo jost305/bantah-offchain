@@ -140,7 +140,7 @@ export default function AdminChallengePayouts() {
                       result === 'challenged_won' ? 'Challenged Wins' : 'Draw';
 
     const totalAmount = parseFloat(challenge.amount) * 2;
-    const platformFee = totalAmount * 0.05;
+    const platformFee = totalAmount * 0.03;
     const winnerPayout = totalAmount - platformFee;
 
     const confirmMessage = result === 'draw' 
@@ -321,7 +321,7 @@ export default function AdminChallengePayouts() {
   const totalStaked = challenges.reduce((sum: number, c: Challenge) => 
     sum + (parseFloat(c.amount) * 2), 0); // Each challenge has 2 participants
   const totalPlatformFees = completedChallenges.reduce((sum: number, c: Challenge) => 
-    sum + (parseFloat(c.amount) * 2 * 0.05), 0); // 5% platform fee
+    sum + (parseFloat(c.amount) * 2 * 0.03), 0); // 3% platform fee
 
   if (isLoading) {
     return (
@@ -745,7 +745,7 @@ export default function AdminChallengePayouts() {
             const estimatedEscrow = stakeAmount * 2;
             const hasRealData = selectedEscrowData !== null && selectedEscrowData !== undefined;
             const totalEscrow = hasRealData ? selectedEscrowData.totalEscrow : estimatedEscrow;
-            const platformFee = totalEscrow * 0.05;
+            const platformFee = totalEscrow * 0.03;
             const winnerPayout = totalEscrow - platformFee;
             const escrowStatus = selectedEscrowData?.status || (challenge.status === 'completed' ? 'released' : 'holding');
             const hasBonusActive = challenge.bonusEndsAt && new Date(challenge.bonusEndsAt) > new Date();
@@ -853,7 +853,7 @@ export default function AdminChallengePayouts() {
                       )}
                     </div>
                     <div className="bg-slate-800 p-3 rounded-lg text-center">
-                      <div className="text-slate-400 text-xs">Platform Fee (5%)</div>
+                      <div className="text-slate-400 text-xs">Platform Fee (3%)</div>
                       <div className="text-yellow-400 font-bold text-lg">₦{platformFee.toLocaleString()}</div>
                     </div>
                     <div className="bg-slate-800 p-3 rounded-lg text-center">
