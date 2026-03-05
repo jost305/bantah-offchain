@@ -18,6 +18,8 @@ interface JoinChallengeModalProps {
     amount: string | number;
     description?: string;
     selectedSide?: string;
+    status?: string;
+    dueDate?: string;
   };
   userBalance: number;
 }
@@ -129,6 +131,16 @@ export function JoinChallengeModal({
   const stakeAmount = Number.parseInt(String(challenge.amount || "0"), 10) || 0;
   const potentialWin = stakeAmount * 2;
   const normalizedBalance = Number(userBalance || 0);
+  const isChallengeEnded = (() => {
+    const status = String(challenge.status || "").toLowerCase();
+    if (["completed", "ended", "cancelled", "disputed"].includes(status)) {
+      return true;
+    }
+    if (!challenge.dueDate) return false;
+    const dueMs = new Date(challenge.dueDate).getTime();
+    if (Number.isNaN(dueMs)) return false;
+    return dueMs <= Date.now();
+  })();
   const sparklinePath = (() => {
     if (btcSeries.length < 2) return "";
     const min = Math.min(...btcSeries);
@@ -217,6 +229,9 @@ export function JoinChallengeModal({
 
   const joinMutation = useMutation({
     mutationFn: async () => {
+      if (isChallengeEnded) {
+        throw new Error("Challenge has ended. New entries are closed while participants wait for resolution.");
+      }
       if (!selectedSide) {
         throw new Error(`Please select ${positiveSideLabel} or ${negativeSideLabel}`);
       }
@@ -385,6 +400,7 @@ export function JoinChallengeModal({
           <div className={`grid grid-cols-2 gap-2 ${isUpDownMarket ? "" : "-mt-4"}`}>
             <button
               onClick={() => setSelectedSide("YES")}
+              disabled={isChallengeEnded}
               className={`py-2 rounded-md text-sm font-semibold transition-all ${
                 selectedSide === "YES"
                   ? "bg-green-500 text-white"
@@ -396,6 +412,7 @@ export function JoinChallengeModal({
             </button>
             <button
               onClick={() => setSelectedSide("NO")}
+              disabled={isChallengeEnded}
               className={`py-2 rounded-md text-sm font-semibold transition-all ${
                 selectedSide === "NO"
                   ? "bg-red-500 text-white"
@@ -412,12 +429,17 @@ export function JoinChallengeModal({
               Processing stake and queue placement...
             </div>
           )}
+          {isChallengeEnded && (
+            <div className="p-2 text-center text-xs text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/50 rounded-md">
+              This challenge has ended. New entries are closed.
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2 pt-2">
           <Button
             onClick={() => joinMutation.mutate()}
-            disabled={!selectedSide || !isBalanceSufficient || joinMutation.isPending}
+            disabled={isChallengeEnded || !selectedSide || !isBalanceSufficient || joinMutation.isPending}
             className="w-full border-0"
             size="sm"
             data-testid="button-confirm-join"

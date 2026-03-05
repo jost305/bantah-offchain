@@ -391,15 +391,15 @@ export default function Challenges() {
   });
 
   const categories = [
-    { id: "create", label: "Create", icon: "/assets/create.png", emoji: "?", gradient: "from-green-400 to-emerald-500", isCreate: true, value: "create" },
-    { id: "all", label: "All", icon: "/assets/versus.svg", emoji: "??", gradient: "from-blue-400 to-purple-500", value: "all" },
-    { id: "sports", label: "Sports", icon: "/assets/sportscon.svg", emoji: "?", gradient: "from-green-400 to-blue-500", value: "sports" },
-    { id: "gaming", label: "Gaming", icon: "/assets/gamingsvg.svg", emoji: "??", gradient: "from-gray-400 to-gray-600", value: "gaming" },
-    { id: "crypto", label: "Crypto", icon: "/assets/cryptosvg.svg", emoji: "?", gradient: "from-yellow-400 to-orange-500", value: "crypto" },
-    { id: "trading", label: "Trading", icon: "/assets/cryptosvg.svg", emoji: "??", gradient: "from-yellow-400 to-orange-500", value: "trading" },
-    { id: "music", label: "Music", icon: "/assets/musicsvg.svg", emoji: "??", gradient: "from-blue-400 to-purple-500", value: "music" },
-    { id: "entertainment", label: "Entertainment", icon: "/assets/popcorn.svg", emoji: "??", gradient: "from-pink-400 to-red-500", value: "entertainment" },
-    { id: "politics", label: "Politics", icon: "/assets/poltiii.svg", emoji: "???", gradient: "from-green-400 to-teal-500", value: "politics" },
+    { id: "create", label: "Create", icon: "/assets/create.png", emoji: "", gradient: "from-green-400 to-emerald-500", isCreate: true, value: "create" },
+    { id: "all", label: "All", icon: "/assets/versus.svg", emoji: "", gradient: "from-blue-400 to-purple-500", value: "all" },
+    { id: "sports", label: "Sports", icon: "/assets/sportscon.svg", emoji: "", gradient: "from-green-400 to-blue-500", value: "sports" },
+    { id: "gaming", label: "Gaming", icon: "/assets/gamingsvg.svg", emoji: "", gradient: "from-gray-400 to-gray-600", value: "gaming" },
+    { id: "crypto", label: "Crypto", icon: "/assets/cryptosvg.svg", emoji: "", gradient: "from-yellow-400 to-orange-500", value: "crypto" },
+    { id: "trading", label: "Trading", icon: "/assets/cryptosvg.svg", emoji: "", gradient: "from-yellow-400 to-orange-500", value: "trading" },
+    { id: "music", label: "Music", icon: "/assets/musicsvg.svg", emoji: "", gradient: "from-blue-400 to-purple-500", value: "music" },
+    { id: "entertainment", label: "Entertainment", icon: "/assets/popcorn.svg", emoji: "", gradient: "from-pink-400 to-red-500", value: "entertainment" },
+    { id: "politics", label: "Politics", icon: "/assets/poltiii.svg", emoji: "", gradient: "from-green-400 to-teal-500", value: "politics" },
   ];
 
   const filteredChallenges = useMemo(() => challenges.filter((challenge: any) => {
@@ -916,7 +916,7 @@ export default function Challenges() {
                           >
                             <FormControl>
                               <SelectTrigger className="h-10 rounded-lg text-sm bg-white dark:bg-slate-800 focus:ring-2 focus:ring-primary/50 transition-colors">
-                                <SelectValue placeholder="?? Select a friend to challenge" />
+                                <SelectValue placeholder="Select a friend to challenge" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent className="z-[80] border-0 shadow-md bg-white dark:bg-slate-800 rounded-lg">
@@ -1026,7 +1026,7 @@ export default function Challenges() {
                                 value={category.value}
                               >
                                 <div className="flex items-center space-x-2">
-                                  <span>{category.emoji}</span>
+                                  {category.emoji ? <span>{category.emoji}</span> : null}
                                   <span>{category.label}</span>
                                 </div>
                               </SelectItem>
@@ -1044,12 +1044,12 @@ export default function Challenges() {
                     render={({ field }) => (
                       <FormItem className="space-y-1">
                         <FormLabel className="sr-only">
-                            Stake (?)
+                            Stake (NGN)
                           </FormLabel>
                         <FormControl>
                           <Input
                             type="number"
-                            placeholder="?500*"
+                            placeholder="500"
                             className="h-8 text-sm"
                             {...field}
                           />
@@ -1086,7 +1086,7 @@ export default function Challenges() {
                     <div className="flex justify-between items-center">
                       <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Potential Win:</span>
                       <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                        ?{(parseFloat(form.watch("amount") || "0") * 2).toLocaleString()}
+                        NGN {(parseFloat(form.watch("amount") || "0") * 2).toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -1189,5 +1189,6 @@ export default function Challenges() {
     </div>
   );
 }
+
 
 

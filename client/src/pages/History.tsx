@@ -84,7 +84,7 @@ export default function History() {
   });
 
   const { data: transactions = [], isLoading: transactionsLoading } = useQuery({
-    queryKey: ["/api/wallet/transactions"],
+    queryKey: ["/api/transactions"],
     retry: false,
     enabled: !!user,
   });

@@ -151,6 +151,24 @@ function getUserId(req: AuthenticatedRequest): string {
   throw new Error("User ID not found in request");
 }
 
+const CLOSED_CHALLENGE_STATUSES = new Set(["completed", "ended", "cancelled", "disputed"]);
+
+function isChallengeClosedForActions(
+  challenge: { status?: string | null; dueDate?: string | Date | null } | null | undefined,
+): boolean {
+  if (!challenge) return true;
+
+  const status = String(challenge.status || "").toLowerCase();
+  if (CLOSED_CHALLENGE_STATUSES.has(status)) {
+    return true;
+  }
+
+  if (!challenge.dueDate) return false;
+  const dueMs = new Date(String(challenge.dueDate)).getTime();
+  if (Number.isNaN(dueMs)) return false;
+  return dueMs <= Date.now();
+}
+
 async function getOptionalPrivyUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
@@ -792,7 +810,16 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
       if (!userId) {
         return res.status(401).json({ message: "User ID not found" });
       }
-      const user = await storage.getUser(userId);
+      let user = await storage.getUser(userId);
+      if (!user) {
+        user = await storage.upsertUser({
+          id: userId,
+          email: req.user?.email || req.user?.claims?.email || undefined,
+          firstName: req.user?.firstName || req.user?.claims?.first_name || undefined,
+          lastName: req.user?.lastName || req.user?.claims?.last_name || undefined,
+          username: req.user?.username || undefined,
+        } as any);
+      }
 
       // Check and create daily login record
       await storage.checkDailyLogin(userId);
@@ -814,17 +841,27 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
       const user = await storage.getUser(userId);
 
       // Ensure user has a referral code
-      if (!user.referralCode) {
+      if (user && !user.referralCode) {
         const referralCode = user.username || `user_${userId.slice(-8)}`;
-        await db
-          .update(users)
-          .set({ 
-            referralCode: referralCode,
-            updatedAt: new Date()
-          })
-          .where(eq(users.id, userId));
+        try {
+          await db
+            .update(users)
+            .set({
+              referralCode: referralCode,
+              updatedAt: new Date()
+            })
+            .where(eq(users.id, userId));
 
-        user.referralCode = referralCode;
+          user.referralCode = referralCode;
+        } catch (referralUpdateError: any) {
+          const isMissingColumn =
+            referralUpdateError?.code === "42703" ||
+            /column .* does not exist/i.test(String(referralUpdateError?.message || ""));
+          if (!isMissingColumn) {
+            throw referralUpdateError;
+          }
+          console.warn("[routes:/api/profile] referral_code column missing; skipping referral code persistence");
+        }
       }
 
       res.json(user);
@@ -3532,6 +3569,11 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
       if (!challengeData) {
         return res.status(404).json({ message: "Challenge not found" });
       }
+      if (isChallengeClosedForActions(challengeData as any)) {
+        return res.status(400).json({
+          message: "This challenge has ended. New entries are closed while participants wait for resolution.",
+        });
+      }
 
       if (challengeData.adminCreated && challengeData.status === 'open') {
         return res.status(400).json({
@@ -3949,6 +3991,11 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
       const challengeData = await storage.getChallengeById(challengeId);
       if (!challengeData) {
         return res.status(404).json({ message: "Challenge not found" });
+      }
+      if (isChallengeClosedForActions(challengeData as any)) {
+        return res.status(400).json({
+          message: "This challenge has ended. New entries are closed while participants wait for resolution.",
+        });
       }
       if (!challengeData.adminCreated) {
         return res.status(400).json({ message: "This endpoint is only for admin-created challenges" });
@@ -4506,6 +4553,18 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
       res.json(transactions);
     } catch (error) {
       console.error("Error fetching transactions:", error);
+      res.status(500).json({ message: "Failed to fetch transactions" });
+    }
+  });
+
+  // Backward-compatibility alias used by older History page clients.
+  app.get('/api/wallet/transactions', PrivyAuthMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = getUserId(req);
+      const transactions = await storage.getTransactions(userId);
+      res.json(transactions);
+    } catch (error) {
+      console.error("Error fetching wallet transactions:", error);
       res.status(500).json({ message: "Failed to fetch transactions" });
     }
   });
@@ -6211,7 +6270,24 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
     try {
       const userId = req.params.userId;
       const currentUserId = getUserId(req);
-      const profile = await storage.getUserProfile(userId, currentUserId);
+      let profile;
+      try {
+        profile = await storage.getUserProfile(userId, currentUserId);
+      } catch (error: any) {
+        const isNotFound = /user not found/i.test(String(error?.message || ""));
+        if (isNotFound && userId === currentUserId) {
+          await storage.upsertUser({
+            id: currentUserId,
+            email: req.user?.email || req.user?.claims?.email || undefined,
+            firstName: req.user?.firstName || req.user?.claims?.first_name || undefined,
+            lastName: req.user?.lastName || req.user?.claims?.last_name || undefined,
+            username: req.user?.username || undefined,
+          } as any);
+          profile = await storage.getUserProfile(userId, currentUserId);
+        } else {
+          throw error;
+        }
+      }
       res.json(profile);
     } catch (error) {
       console.error("Error fetching user profile:", error);
@@ -7945,6 +8021,11 @@ export async function registerRoutes(app: Express, upload?: any): Promise<Server
       const challenge = await storage.getChallengeById(numericChallengeId);
       if (!challenge) {
         return res.status(404).json({ message: "Challenge not found" });
+      }
+      if (isChallengeClosedForActions(challenge as any)) {
+        return res.status(400).json({
+          message: "This challenge has ended. New entries are closed while participants wait for resolution.",
+        });
       }
       if (!challenge.adminCreated) {
         return res.status(400).json({ message: "Queue joining is only available for admin-created challenges" });

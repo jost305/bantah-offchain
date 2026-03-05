@@ -30,13 +30,13 @@ const createChallengeSchema = z.object({
 type FormData = z.infer<typeof createChallengeSchema>;
 
 const CATEGORIES = [
-  { value: 'sports', label: '⚽ Sports' },
-  { value: 'gaming', label: '🎮 Gaming' },
-  { value: 'crypto', label: '💰 Crypto' },
-  { value: 'trading', label: '📈 Trading' },
-  { value: 'music', label: '🎵 Music' },
-  { value: 'entertainment', label: '🎬 Entertainment' },
-  { value: 'politics', label: '🏛️ Politics' },
+  { value: 'sports', label: 'Sports' },
+  { value: 'gaming', label: 'Gaming' },
+  { value: 'crypto', label: 'Crypto' },
+  { value: 'trading', label: 'Trading' },
+  { value: 'music', label: 'Music' },
+  { value: 'entertainment', label: 'Entertainment' },
+  { value: 'politics', label: 'Politics' },
 ];
 
 export default function AdminChallengeCreate() {
@@ -297,7 +297,7 @@ export default function AdminChallengeCreate() {
                     name="amount"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-slate-300">Stake Amount (₦) *</FormLabel>
+                        <FormLabel className="text-slate-300">Stake Amount (NGN) *</FormLabel>
                         <FormControl>
                           <Input
                             type="number"
@@ -441,3 +441,4 @@ export default function AdminChallengeCreate() {
     </AdminLayout>
   );
 }
+

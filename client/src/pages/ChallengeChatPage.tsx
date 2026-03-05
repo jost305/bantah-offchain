@@ -167,6 +167,14 @@ export default function ChallengeChatPage() {
   const isBtcUpDownMarket = isBtcUpDownChallenge(challenge);
   const isAdminUpDownMarket = isBtcUpDownMarket && challenge?.adminCreated === true;
   const minUpDownStakeAmount = Math.max(1, Number.parseInt(String(challenge?.amount || "0"), 10) || 0);
+  const normalizedChallengeStatus = String(challenge?.status || "").toLowerCase();
+  const challengeDueDateMs = challenge?.dueDate ? new Date(String(challenge.dueDate)).getTime() : NaN;
+  const isChallengeEndedForActions =
+    !!challenge &&
+    (
+      ["completed", "ended", "cancelled", "disputed"].includes(normalizedChallengeStatus) ||
+      (Number.isFinite(challengeDueDateMs) && challengeDueDateMs <= countdownNowMs)
+    );
 
   useEffect(() => {
     if (!isAdminUpDownMarket) return;
@@ -1116,13 +1124,19 @@ export default function ChallengeChatPage() {
                       <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">{upDownWindowLabel}</p>
                     </div>
                   </div>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold px-2 py-1">
-                    <span className="relative inline-flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                  {isChallengeEndedForActions ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-bold px-2 py-1">
+                      ENDED
                     </span>
-                    LIVE
-                  </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold px-2 py-1">
+                      <span className="relative inline-flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                      </span>
+                      LIVE
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1169,6 +1183,7 @@ export default function ChallengeChatPage() {
                       <button
                         type="button"
                         onClick={() => setUpDownJoinSide("YES")}
+                        disabled={isChallengeEndedForActions}
                         className={`h-10 rounded-full border text-sm font-bold transition-colors ${
                           upDownJoinSide === "YES"
                             ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
@@ -1180,6 +1195,7 @@ export default function ChallengeChatPage() {
                       <button
                         type="button"
                         onClick={() => setUpDownJoinSide("NO")}
+                        disabled={isChallengeEndedForActions}
                         className={`h-10 rounded-full border text-sm font-bold transition-colors ${
                           upDownJoinSide === "NO"
                             ? "border-red-500 bg-red-500/15 text-red-700 dark:text-red-300"
@@ -1199,6 +1215,7 @@ export default function ChallengeChatPage() {
                             min={1}
                             step={1}
                             value={upDownStakeAmount > 0 ? upDownStakeAmount : ""}
+                            disabled={isChallengeEndedForActions}
                             onChange={(e) => {
                               const nextValue = Number.parseInt(e.target.value, 10);
                               setSelectedQuickAmount(null);
@@ -1221,6 +1238,7 @@ export default function ChallengeChatPage() {
                           key={option}
                           type="button"
                           onClick={() => handleQuickAmountPick(option)}
+                          disabled={isChallengeEndedForActions}
                           className={`h-7 rounded-md border text-[11px] font-bold transition-colors ${
                             selectedQuickAmount === option
                               ? "border-slate-900 dark:border-slate-100 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
@@ -1235,7 +1253,15 @@ export default function ChallengeChatPage() {
 
                     <Button
                       className="mt-4 h-11 text-sm font-bold"
+                      disabled={isChallengeEndedForActions}
                       onClick={() => {
+                        if (isChallengeEndedForActions) {
+                          toast({
+                            title: "Challenge ended",
+                            description: "New entries are closed while participants wait for resolution.",
+                          });
+                          return;
+                        }
                         if (!isAuthenticated) {
                           login();
                           return;
@@ -1252,7 +1278,7 @@ export default function ChallengeChatPage() {
                         setShowUpDownJoinModal(true);
                       }}
                     >
-                      {isAuthenticated ? "Trade Now" : "Sign in to trade"}
+                      {isChallengeEndedForActions ? "Ended" : (isAuthenticated ? "Trade Now" : "Sign in to trade")}
                     </Button>
                   </aside>
                 </div>

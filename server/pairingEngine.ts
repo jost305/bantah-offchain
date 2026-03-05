@@ -62,6 +62,10 @@ export class PairingEngine {
         if (!challenge || challenge.status !== "open") {
           throw new Error("Challenge not open for joining");
         }
+        const dueMs = challenge.dueDate ? new Date(String(challenge.dueDate)).getTime() : NaN;
+        if (Number.isFinite(dueMs) && dueMs <= Date.now()) {
+          throw new Error("Challenge has ended. New entries are closed.");
+        }
 
         // Step 2: Verify user hasn't already joined this challenge
         const existingQueue = await tx

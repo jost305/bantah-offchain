@@ -267,11 +267,47 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   sessionStore: any;
   private db = db; // Alias db for internal use
+  private readonly closedChallengeStatuses = new Set(["completed", "ended", "cancelled", "disputed"]);
   private leaderboardCache: {
     expiresAt: number;
     limit: number;
-    data: (User & { rank: number; coins: number; eventsWon: number; challengesWon: number })[];
+      data: (User & { rank: number; coins: number; eventsWon: number; challengesWon: number })[];
   } | null = null;
+
+  private isMissingColumnError(error: unknown): boolean {
+    const code = (error as any)?.code;
+    const message = String((error as any)?.message || "");
+    return code === "42703" || /column .* does not exist/i.test(message);
+  }
+
+  private normalizeUserRow(row: any): User {
+    if (!row) return row;
+    const normalized = {
+      ...row,
+      firstName: row.firstName ?? row.first_name ?? null,
+      lastName: row.lastName ?? row.last_name ?? null,
+      profileImageUrl: row.profileImageUrl ?? row.profile_image_url ?? null,
+      referralCode: row.referralCode ?? row.referral_code ?? null,
+      isAdmin: row.isAdmin ?? row.is_admin ?? false,
+      walletAddress: row.walletAddress ?? row.wallet_address ?? null,
+      primaryWalletAddress: row.primaryWalletAddress ?? row.primary_wallet_address ?? null,
+      telegramId: row.telegramId ?? row.telegram_id ?? null,
+      telegramUsername: row.telegramUsername ?? row.telegram_username ?? null,
+      isTelegramUser: row.isTelegramUser ?? row.is_telegram_user ?? false,
+      createdAt: row.createdAt ?? row.created_at ?? null,
+      updatedAt: row.updatedAt ?? row.updated_at ?? null,
+      lastLogin: row.lastLogin ?? row.last_login ?? null,
+      referralEarnings: row.referralEarnings ?? row.referral_earnings ?? "0",
+      referralCount: row.referralCount ?? row.referral_count ?? 0,
+    };
+    return normalized as User;
+  }
+
+  private async getUserRawBy(column: "id" | "username" | "email", value: string): Promise<User | undefined> {
+    const result = await pool.query(`SELECT * FROM users WHERE ${column} = $1 LIMIT 1`, [value]);
+    const row = result.rows[0];
+    return row ? this.normalizeUserRow(row) : undefined;
+  }
 
   private normalizeP2PChallengeStatus(
     status: string | null | undefined,
@@ -292,6 +328,20 @@ export class DatabaseStorage implements IStorage {
     }
 
     return rawStatus || 'pending';
+  }
+
+  private isChallengeClosedForNewActions(challenge: Partial<Challenge> | null | undefined): boolean {
+    if (!challenge) return true;
+
+    const status = String(challenge.status || "").toLowerCase();
+    if (this.closedChallengeStatuses.has(status)) {
+      return true;
+    }
+
+    if (!challenge.dueDate) return false;
+    const dueMs = new Date(String(challenge.dueDate)).getTime();
+    if (Number.isNaN(dueMs)) return false;
+    return dueMs <= Date.now();
   }
 
   private async getChallengeCommentCount(challengeId: number): Promise<number> {
@@ -654,28 +704,54 @@ export class DatabaseStorage implements IStorage {
 
   // User operations - Updated for email/password auth
   async getUser(id: string): Promise<User | undefined> {
-    const [user] = await this.db.select().from(users).where(eq(users.id, id));
-    return user;
+    try {
+      const [user] = await this.db.select().from(users).where(eq(users.id, id));
+      return user;
+    } catch (error) {
+      if (!this.isMissingColumnError(error)) throw error;
+      console.warn("[storage:getUser] Falling back to raw users query due to schema mismatch");
+      return await this.getUserRawBy("id", id);
+    }
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await this.db.select().from(users).where(eq(users.username, username));
-    return user;
+    try {
+      const [user] = await this.db.select().from(users).where(eq(users.username, username));
+      return user;
+    } catch (error) {
+      if (!this.isMissingColumnError(error)) throw error;
+      console.warn("[storage:getUserByUsername] Falling back to raw users query due to schema mismatch");
+      return await this.getUserRawBy("username", username);
+    }
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await this.db.select().from(users).where(eq(users.email, email));
-    return user;
+    try {
+      const [user] = await this.db.select().from(users).where(eq(users.email, email));
+      return user;
+    } catch (error) {
+      if (!this.isMissingColumnError(error)) throw error;
+      console.warn("[storage:getUserByEmail] Falling back to raw users query due to schema mismatch");
+      return await this.getUserRawBy("email", email);
+    }
   }
 
   async getUserByUsernameOrEmail(usernameOrEmail: string): Promise<User | undefined> {
-    const [user] = await this.db.select().from(users).where(
-      or(
-        eq(users.username, usernameOrEmail),
-        eq(users.email, usernameOrEmail)
-      )
-    );
-    return user;
+    try {
+      const [user] = await this.db.select().from(users).where(
+        or(
+          eq(users.username, usernameOrEmail),
+          eq(users.email, usernameOrEmail)
+        )
+      );
+      return user;
+    } catch (error) {
+      if (!this.isMissingColumnError(error)) throw error;
+      console.warn("[storage:getUserByUsernameOrEmail] Falling back to raw users query due to schema mismatch");
+      const byUsername = await this.getUserRawBy("username", usernameOrEmail);
+      if (byUsername) return byUsername;
+      return await this.getUserRawBy("email", usernameOrEmail);
+    }
   }
 
   async getUserByTelegramId(telegramId: string): Promise<User | null> {
@@ -1839,6 +1915,9 @@ export class DatabaseStorage implements IStorage {
     if (!challenge) {
       throw new Error("Challenge not found");
     }
+    if (this.isChallengeClosedForNewActions(challenge)) {
+      throw new Error("Challenge has ended. New entries are closed while participants wait for resolution.");
+    }
 
     const challengeAmount = parseFloat(challenge.amount);
     const userBalance = await this.getUserBalance(userId);
@@ -2306,6 +2385,9 @@ export class DatabaseStorage implements IStorage {
       const challenge = await this.getChallengeById(challengeId);
       if (!challenge) {
         throw new Error('Challenge not found');
+      }
+      if (this.isChallengeClosedForNewActions(challenge)) {
+        throw new Error('Challenge has ended. New entries are closed while participants wait for resolution.');
       }
 
       // Admin challenges must be in 'open' status to join
@@ -2807,71 +2889,100 @@ export class DatabaseStorage implements IStorage {
       return this.leaderboardCache.data.slice(0, limit);
     }
 
-    const eventsWonSubquery = this.db
-      .select({
-        userId: eventParticipants.userId,
-        eventsWon: sql<number>`count(*)`,
-      })
-      .from(eventParticipants)
-      .where(eq(eventParticipants.status, "won"))
-      .groupBy(eventParticipants.userId)
-      .as("events_won_subquery");
-
-    const challengerWinsSubquery = this.db
-      .select({
-        userId: challenges.challenger,
-        wins: sql<number>`count(*)`,
-      })
-      .from(challenges)
-      .where(eq(challenges.result, "challenger_won"))
-      .groupBy(challenges.challenger)
-      .as("challenger_wins_subquery");
-
-    const challengedWinsSubquery = this.db
-      .select({
-        userId: challenges.challenged,
-        wins: sql<number>`count(*)`,
-      })
-      .from(challenges)
-      .where(eq(challenges.result, "challenged_won"))
-      .groupBy(challenges.challenged)
-      .as("challenged_wins_subquery");
-
-    const result = await this.db
-      .select({
-        id: users.id,
-        username: users.username,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        profileImageUrl: users.profileImageUrl,
-        level: users.level,
-        xp: users.xp,
-        points: users.points,
-        balance: users.balance,
-        coins: users.coins,
-        rank: sql<number>`ROW_NUMBER() OVER (ORDER BY ${users.coins} DESC)`,
-        eventsWon: sql<number>`COALESCE(${eventsWonSubquery.eventsWon}, 0)`,
-        challengesWon: sql<number>`COALESCE(${challengerWinsSubquery.wins}, 0) + COALESCE(${challengedWinsSubquery.wins}, 0)`,
-      })
-      .from(users)
-      .leftJoin(eventsWonSubquery, eq(users.id, eventsWonSubquery.userId))
-      .leftJoin(challengerWinsSubquery, eq(users.id, challengerWinsSubquery.userId))
-      .leftJoin(challengedWinsSubquery, eq(users.id, challengedWinsSubquery.userId))
-      .where(
-        and(
-          eq(users.status, "active"),
-          eq(users.isAdmin, false),
-        ),
-      )
-      .orderBy(desc(users.coins))
-      .limit(limit);
-
-    const typedResult = result as (User & {
+    let typedResult: (User & {
       rank: number;
       coins: number;
       eventsWon: number;
       challengesWon: number;
-    })[];
+    })[] = [];
+
+    try {
+      const eventsWonSubquery = this.db
+        .select({
+          userId: eventParticipants.userId,
+          eventsWon: sql<number>`count(*)`.as("events_won"),
+        })
+        .from(eventParticipants)
+        .where(eq(eventParticipants.status, "won"))
+        .groupBy(eventParticipants.userId)
+        .as("events_won_subquery");
+
+      const challengerWinsSubquery = this.db
+        .select({
+          userId: challenges.challenger,
+          challengerWins: sql<number>`count(*)`.as("challenger_wins"),
+        })
+        .from(challenges)
+        .where(eq(challenges.result, "challenger_won"))
+        .groupBy(challenges.challenger)
+        .as("challenger_wins_subquery");
+
+      const challengedWinsSubquery = this.db
+        .select({
+          userId: challenges.challenged,
+          challengedWins: sql<number>`count(*)`.as("challenged_wins"),
+        })
+        .from(challenges)
+        .where(eq(challenges.result, "challenged_won"))
+        .groupBy(challenges.challenged)
+        .as("challenged_wins_subquery");
+
+      const result = await this.db
+        .select({
+          id: users.id,
+          username: users.username,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          profileImageUrl: users.profileImageUrl,
+          level: users.level,
+          xp: users.xp,
+          points: users.points,
+          balance: users.balance,
+          coins: users.coins,
+          rank: sql<number>`ROW_NUMBER() OVER (ORDER BY ${users.coins} DESC)`,
+          eventsWon: sql<number>`COALESCE(${eventsWonSubquery.eventsWon}, 0)`,
+          challengesWon: sql<number>`COALESCE(${challengerWinsSubquery.challengerWins}, 0) + COALESCE(${challengedWinsSubquery.challengedWins}, 0)`,
+        })
+        .from(users)
+        .leftJoin(eventsWonSubquery, eq(users.id, eventsWonSubquery.userId))
+        .leftJoin(challengerWinsSubquery, eq(users.id, challengerWinsSubquery.userId))
+        .leftJoin(challengedWinsSubquery, eq(users.id, challengedWinsSubquery.userId))
+        .where(
+          and(
+            eq(users.status, "active"),
+            eq(users.isAdmin, false),
+          ),
+        )
+        .orderBy(desc(users.coins))
+        .limit(limit);
+
+      typedResult = result as (User & {
+        rank: number;
+        coins: number;
+        eventsWon: number;
+        challengesWon: number;
+      })[];
+    } catch (error) {
+      console.warn("[storage:getLeaderboard] Primary leaderboard query failed; using legacy fallback", error);
+      const fallbackRows = await pool.query(`SELECT * FROM users LIMIT $1`, [Math.max(limit * 5, 250)]);
+
+      typedResult = fallbackRows.rows
+        .map((row) => this.normalizeUserRow(row))
+        .filter((u: any) => String(u?.status || "active").toLowerCase() === "active" && !Boolean(u?.isAdmin))
+        .sort((a: any, b: any) => {
+          const aScore = Number(a?.coins ?? a?.points ?? 0);
+          const bScore = Number(b?.coins ?? b?.points ?? 0);
+          return bScore - aScore;
+        })
+        .slice(0, limit)
+        .map((u: any, index: number) => ({
+          ...(u as User),
+          rank: index + 1,
+          coins: Number(u?.coins ?? u?.points ?? 0),
+          eventsWon: 0,
+          challengesWon: 0,
+        }));
+    }
 
     this.leaderboardCache = {
       expiresAt: now + 30_000,
@@ -3288,11 +3399,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserProfile(userId: string, currentUserId: string): Promise<any> {
-    const [user] = await this.db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    const user = await this.getUser(userId);
 
     if (!user) {
       throw new Error("User not found");

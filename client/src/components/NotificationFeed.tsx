@@ -5,10 +5,9 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Bell, X, Check } from 'lucide-react';
+import { Bell, X, Check, Zap, Clock, Eye, Flame, Rocket, CheckCircle2, Bot, Megaphone } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import Pusher from 'pusher-js';
-import { queryClient } from '@/lib/queryClient';
 
 interface Notification {
   id: string;
@@ -30,7 +29,6 @@ export const NotificationFeed: React.FC<NotificationFeedProps> = ({ maxDisplay =
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
-  const [pusher, setPusher] = useState<Pusher | null>(null);
 
   // Initialize Pusher on mount
   useEffect(() => {
@@ -45,8 +43,6 @@ export const NotificationFeed: React.FC<NotificationFeedProps> = ({ maxDisplay =
       setNotifications((prev) => [data, ...prev].slice(0, 50)); // Keep last 50
       setUnreadCount((prev) => prev + 1);
     });
-
-    setPusher(pusherInstance);
 
     return () => {
       channel.unbind('notification');
@@ -100,21 +96,6 @@ export const NotificationFeed: React.FC<NotificationFeedProps> = ({ maxDisplay =
       console.error('Error dismissing notification:', error);
     }
   }, []);
-
-  const getIconForEvent = (event: string): string => {
-    const icons: Record<string, string> = {
-      'challenge.created': '⚡',
-      'challenge.starting_soon': '⏱',
-      'challenge.ending_soon': '⏳',
-      'challenge.joined.friend': '👀',
-      'imbalance.detected': '🔥',
-      'bonus.activated': '🚀',
-      'bonus.expiring': '⏰',
-      'match.found': '✅',
-      'system.joined': '🤖',
-    };
-    return icons[event] || '📢';
-  };
 
   const getPriorityColor = (priority: string): string => {
     switch (priority) {
@@ -178,7 +159,9 @@ export const NotificationFeed: React.FC<NotificationFeedProps> = ({ maxDisplay =
                   <div className="flex justify-between items-start gap-2">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-lg">{getIconForEvent(notif.event)}</span>
+                        <span className="inline-flex items-center justify-center text-slate-700 dark:text-slate-200">
+                          {getIconForEvent(notif.event, "w-4 h-4")}
+                        </span>
                         <h4 className="font-semibold text-sm text-slate-900 dark:text-white">
                           {notif.title}
                         </h4>
@@ -256,7 +239,9 @@ export const NotificationToast: React.FC<{ notification: Notification }> = ({ no
         : 'bg-blue-50 dark:bg-blue-900/20 border-blue-500'
     }`}>
       <div className="flex items-start gap-3">
-        <span className="text-2xl">{getIconForEvent(notification.event)}</span>
+        <span className="inline-flex items-center justify-center text-slate-700 dark:text-slate-200">
+          {getIconForEvent(notification.event, "w-5 h-5")}
+        </span>
         <div className="flex-1">
           <h4 className="font-semibold text-slate-900 dark:text-white">{notification.title}</h4>
           <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">{notification.body}</p>
@@ -266,19 +251,27 @@ export const NotificationToast: React.FC<{ notification: Notification }> = ({ no
   );
 };
 
-function getIconForEvent(event: string): string {
-  const icons: Record<string, string> = {
-    'challenge.created': '⚡',
-    'challenge.starting_soon': '⏱',
-    'challenge.ending_soon': '⏳',
-    'challenge.joined.friend': '👀',
-    'imbalance.detected': '🔥',
-    'bonus.activated': '🚀',
-    'bonus.expiring': '⏰',
-    'match.found': '✅',
-    'system.joined': '🤖',
-  };
-  return icons[event] || '📢';
+function getIconForEvent(event: string, className: string) {
+  switch (event) {
+    case 'challenge.created':
+      return <Zap className={className} />;
+    case 'challenge.starting_soon':
+    case 'challenge.ending_soon':
+    case 'bonus.expiring':
+      return <Clock className={className} />;
+    case 'challenge.joined.friend':
+      return <Eye className={className} />;
+    case 'imbalance.detected':
+      return <Flame className={className} />;
+    case 'bonus.activated':
+      return <Rocket className={className} />;
+    case 'match.found':
+      return <CheckCircle2 className={className} />;
+    case 'system.joined':
+      return <Bot className={className} />;
+    default:
+      return <Megaphone className={className} />;
+  }
 }
 
 export default NotificationFeed;

@@ -1,7 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { formatDistanceToNow } from "date-fns";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -271,18 +270,23 @@ export function ChallengeCard({
     (challengeTitleLower.includes("bitcoin") || challengeTitleLower.includes("btc")) &&
     (
       challengeTitleLower.includes("up or down") ||
-      challengeTitleLower.includes("up/down") ||
-      (challengeTitleLower.includes("up") && challengeTitleLower.includes("down"))
+        challengeTitleLower.includes("up/down") ||
+        (challengeTitleLower.includes("up") && challengeTitleLower.includes("down"))
     );
-  // Continuous Up/Down markets should not auto-end by dueDate.
+  const normalizedStatus = String(effectiveStatus || "").toLowerCase();
+  const isEndedByStatus =
+    normalizedStatus === "completed" ||
+    normalizedStatus === "ended" ||
+    normalizedStatus === "cancelled" ||
+    normalizedStatus === "disputed";
+  const dueDateMs = challenge.dueDate ? new Date(challenge.dueDate).getTime() : NaN;
+  const isEndedByDueDate = Number.isFinite(dueDateMs) && dueDateMs <= Date.now();
   const isEnded =
-    effectiveStatus === 'completed' ||
-    (!isUpDownMarket && challenge.dueDate && new Date(challenge.dueDate).getTime() <= Date.now());
+    isEndedByStatus ||
+    isEndedByDueDate;
   const isFinishedChallengeCard =
     isEnded ||
-    effectiveStatus === "completed" ||
-    effectiveStatus === "cancelled" ||
-    effectiveStatus === "disputed";
+    normalizedStatus === "pending_admin";
 
   const getStatusBadge = (status: string) => {
     if (challenge.adminCreated) {
@@ -408,9 +412,6 @@ export function ChallengeCard({
       : user?.id === challenge.challenged
         ? challenge.challengerUser
         : challenge.challengerUser;
-  const timeAgo = formatDistanceToNow(new Date(challenge.createdAt), {
-    addSuffix: true,
-  });
 
   // Helper function to get status text for the card
   const getStatusText = () => {
@@ -449,8 +450,55 @@ export function ChallengeCard({
     return `${diffWeeks}w`;
   };
 
+  const getOrdinalDay = (day: number) => {
+    const remainder = day % 100;
+    if (remainder >= 11 && remainder <= 13) return `${day}th`;
+    switch (day % 10) {
+      case 1:
+        return `${day}st`;
+      case 2:
+        return `${day}nd`;
+      case 3:
+        return `${day}rd`;
+      default:
+        return `${day}th`;
+    }
+  };
+
+  const getChallengeEndsLabel = (dueDate?: string, createdAt?: string) => {
+    if (!dueDate) {
+      return createdAt ? `Created ${getCompactTimeAgo(createdAt)}` : "No end date";
+    }
+
+    const due = new Date(dueDate);
+    const dueMs = due.getTime();
+    if (Number.isNaN(dueMs)) {
+      return createdAt ? `Created ${getCompactTimeAgo(createdAt)}` : "No end date";
+    }
+
+    const nowMs = Date.now();
+    const diffMs = dueMs - nowMs;
+
+    if (diffMs <= 0) {
+      return `Ended ${getOrdinalDay(due.getDate())} ${due.toLocaleString("en-US", { month: "long" })}`;
+    }
+
+    const minutesLeft = Math.ceil(diffMs / 60000);
+    if (minutesLeft < 60) {
+      return `Ends in ${minutesLeft}m`;
+    }
+
+    const hoursLeft = Math.ceil(diffMs / 3600000);
+    if (hoursLeft <= 24) {
+      return `Ends in ${hoursLeft}h`;
+    }
+
+    return `Ends ${getOrdinalDay(due.getDate())} ${due.toLocaleString("en-US", { month: "long" })}`;
+  };
+
   const isHeadToHeadMatched = !challenge.adminCreated && !!challenge.challenger && !!challenge.challenged;
   const hasJoined = user?.id === challenge.challenger || user?.id === challenge.challenged;
+  const canJoinAdminSide = challenge.adminCreated && effectiveStatus === "open" && !isEnded && !hasJoined;
   const isAwaitingAcceptance = effectiveStatus === "open" || effectiveStatus === "pending";
   const challengedId = typeof (challenge as any).challenged === "string"
     ? String((challenge as any).challenged).trim()
@@ -567,7 +615,7 @@ export function ChallengeCard({
                 </button>
               )}
               <div className="mt-0.5 flex items-center gap-1 text-[9px] font-semibold text-slate-400 dark:text-slate-500">
-                <span className="uppercase">{getCompactTimeAgo(challenge.createdAt)}</span>
+                <span>{getChallengeEndsLabel(challenge.dueDate, challenge.createdAt)}</span>
               </div>
             </div>
           </div>
@@ -714,13 +762,13 @@ export function ChallengeCard({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if ((challenge.status !== "completed" && challenge.status !== "ended") && !hasJoined) {
+                      if (canJoinAdminSide) {
                         onJoin?.({ ...challenge, selectedSide: "yes" });
                       }
                     }}
-                    disabled={challenge.status === "completed" || challenge.status === "ended" || hasJoined}
+                    disabled={!canJoinAdminSide}
                     className={`flex items-center justify-center text-sm font-bold rounded-lg py-2 flex-1 transition-opacity ${
-                      (challenge.status !== "completed" && challenge.status !== "ended") && !hasJoined
+                      canJoinAdminSide
                         ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 dark:bg-emerald-500/20 hover:opacity-80 cursor-pointer"
                         : "text-emerald-600/40 dark:text-emerald-400/40 bg-emerald-500/5 dark:bg-emerald-500/10 cursor-not-allowed"
                     }`}
@@ -731,13 +779,13 @@ export function ChallengeCard({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if ((challenge.status !== "completed" && challenge.status !== "ended") && !hasJoined) {
+                      if (canJoinAdminSide) {
                         onJoin?.({ ...challenge, selectedSide: "no" });
                       }
                     }}
-                    disabled={challenge.status === "completed" || challenge.status === "ended" || hasJoined}
+                    disabled={!canJoinAdminSide}
                     className={`flex items-center justify-center text-sm font-bold rounded-lg py-2 flex-1 transition-opacity ${
-                      (challenge.status !== "completed" && challenge.status !== "ended") && !hasJoined
+                      canJoinAdminSide
                         ? "text-red-600 dark:text-red-400 bg-red-500/15 dark:bg-red-500/20 hover:opacity-80 cursor-pointer"
                         : "text-red-600/40 dark:text-red-400/40 bg-red-500/5 dark:bg-red-500/10 cursor-not-allowed"
                     }`}
